@@ -30,11 +30,19 @@ class ColumnRule(BaseModel):
         default=None,
         description="Group name to maintain referential consistency across foreign keys",
     )
+    rules: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional nested field path rules for composite/JSON masking",
+    )
 
     @field_validator("strategy")
     @classmethod
     def normalize_strategy_name(cls, v: str) -> str:
         return v.strip().lower()
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.rules is not None and "rules" not in self.params:
+            self.params["rules"] = self.rules
 
 
 class TableRule(BaseModel):

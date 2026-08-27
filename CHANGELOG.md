@@ -8,11 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Nested JSON / JSONB Masking Engine (`json_mask`)**: Support for dot-notation (`profile.contact.email`), array wildcards (`orders[*].card`), and object wildcards (`metadata.*`) with native data type preservation.
+- **Multi-Core Chunk Streaming Parser (`ParallelStreamParser`)**: ProcessPoolExecutor-based bounded producer-consumer streaming via `cloakdb apply --workers N`.
+- **Extended SQL Dialects**: Microsoft SQL Server (T-SQL bracketed identifiers, `N'...'` unicode string prefixes, `IDENTITY_INSERT`, `GO`) and Oracle SQL (`REM`, `PROMPT`, quoted identifiers).
 - Safe AST-based condition evaluation replacing unsafe `eval()` expressions.
 - Golden integration test fixture suite (`tests/fixtures/`) verifying end-to-end multi-table relational masking.
 - Memory tracking with `tracemalloc` in benchmarking tools and CLI `cloakdb bench`.
 - Automated CodeQL static analysis and Dependabot configuration.
-- Comprehensive unit tests across CLI, parsers, and masking strategies.
+- Comprehensive unit test suite with 70 passing tests.
 
 ### Changed
 - Improved explicit seed scoping and cache-independent `ConsistencyGroup` determinism.

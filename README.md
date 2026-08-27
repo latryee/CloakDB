@@ -3,13 +3,13 @@
 # 🛡️ CloakDB
 
 **Deterministic database & SQL dump anonymization CLI.**  
-*Sanitize database dumps and tables with referential integrity and constant memory consumption.*
+*Sanitize database dumps, JSON/JSONB payloads, and live tables with referential integrity, multi-core streaming, and constant memory consumption.*
 
 ![CloakDB Social Banner](./assets/social_preview.png)
 
 [![CI](https://github.com/latryee/CloakDB/actions/workflows/ci.yml/badge.svg)](https://github.com/latryee/CloakDB/actions)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/latryee/CloakDB)
-[![Coverage](https://img.shields.io/badge/coverage-88%25-brightgreen.svg)](https://github.com/latryee/CloakDB)
+[![Coverage](https://img.shields.io/badge/coverage-87%25-brightgreen.svg)](https://github.com/latryee/CloakDB)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -20,8 +20,8 @@
 [CLI Commands](#-cli-commands-reference) •
 [Configuration](#-configuration-guide-cloakdbyaml) •
 [Strategies](#-masking-strategies-catalog) •
-[Benchmarks](#-benchmarks) •
-[Limitations](#-known-limitations)
+[Dialect Support](#-extended-dialect-support) •
+[Benchmarks](#-benchmarks)
 
 </div>
 
@@ -32,25 +32,26 @@
 Creating staging and testing databases from production dumps often presents three challenges:
 - **Foreign Key Breakage:** Random generation breaks foreign key relationships across related tables (`users.id` no longer matches `orders.user_id`).
 - **Memory Consumption:** Loading full SQL dumps into memory causes Out-Of-Memory crashes on multi-gigabyte datasets.
-- **Manual Schema Mapping:** Manually inspecting hundreds of columns to write masking rules is error-prone and time-consuming.
+- **Nested Payload Complexity:** Modern databases heavily store unstructured JSON/JSONB columns containing embedded PII.
 
 **CloakDB** addresses these problems:
-1. **Deterministic Referential Integrity:** Primary and foreign keys are pseudonymized using keyed HMAC hashing (globally consistent across tables) or `ConsistencyGroup` definitions for synthetic data (where determinism is mathematically reproducible independent of LRU cache retention).
-2. **Streaming Pipeline:** Streams PostgreSQL `COPY` / `INSERT`, MySQL, SQLite, CSV, and JSONL data in constant memory (~1 MB working set).
-3. **Automated PII Discovery (`cloakdb scan`):** Automatically analyzes schemas and sample values (emails, phones, Luhn-validated credit cards, Turkish TCKN, SSN, IBAN, IP addresses, high-entropy secrets) to generate ready-to-use YAML configurations.
+1. **Deterministic Referential Integrity:** Primary and foreign keys are pseudonymized using keyed HMAC hashing (globally consistent across tables) or `ConsistencyGroup` definitions for synthetic data (mathematically reproducible independent of LRU cache retention).
+2. **Multi-Core Streaming Pipeline:** Streams PostgreSQL `COPY` / `INSERT`, MySQL, SQLite, MS SQL Server (T-SQL), Oracle SQL, CSV, and JSONL data in constant memory with optional multi-worker parallel chunk parsing (`--workers N`).
+3. **Nested JSON / JSONB Masking:** Recursively sanitizes nested paths using dot-notation (`profile.contact.email`), array wildcards (`orders[*].credit_card`), and object wildcards (`metadata.*`).
+4. **Automated PII Discovery (`cloakdb scan`):** Automatically analyzes schemas and sample values (emails, phones, Luhn-validated credit cards, Turkish TCKN, SSN, IBAN, IP addresses, high-entropy secrets) to generate ready-to-use YAML configurations.
 
 ---
 
 ## 🔄 Real-World Before / After Comparison
 
-CloakDB masks PII while **preserving relational integrity** (e.g. `users.id` matches `orders.user_id`), retaining corporate email domains, and preserving statistical distributions:
+CloakDB masks PII while **preserving relational integrity** (e.g. `users.id` matches `orders.user_id`), retaining corporate email domains, sanitizing nested JSON objects, and preserving statistical distributions:
 
 ### 🔴 Before (Raw Production SQL Dump)
 ```sql
 -- Table: users
-COPY public.users (id, full_name, email, tc_kimlik, phone, salary, birth_date) FROM stdin;
-1001	Eleanor Vance	eleanor.vance@hillhouse.org	10000000146	+1-555-0199	95000.00	1988-04-12
-1002	Luke Sanderson	luke.sanderson@heritage.com	23854910284	+1-555-0142	115000.50	1985-09-23
+COPY public.users (id, full_name, email, tc_kimlik, phone, salary, raw_metadata) FROM stdin;
+1001	Eleanor Vance	eleanor.vance@hillhouse.org	10000000146	+1-555-0199	95000.00	{"profile": {"contact_email": "eleanor@hillhouse.org"}, "cards": [{"num": "4532015012345678"}]}
+1002	Luke Sanderson	luke.sanderson@heritage.com	23854910284	+1-555-0142	115000.50	{"profile": {"contact_email": "luke@heritage.com"}, "cards": [{"num": "5425233430109823"}]}
 \.
 
 -- Table: orders (user_id is a Foreign Key referencing users.id)
@@ -60,15 +61,15 @@ INSERT INTO public.orders (id, user_id, order_total, shipping_address, customer_
 
 -- Table: audit_logs
 INSERT INTO public.audit_logs (id, user_id, raw_payload) VALUES
-(1, 1001, '{"action": "login", "password_attempt": "SecretPass123!"}');
+(1, 1001, '{"action": "login", "auth": {"token": "secret_tok_xyz"}}');
 ```
 
 ### 🟢 After (CloakDB Sanitized Dump)
 ```sql
--- Table: users (Names, Emails, TCKN, Phones & Salaries masked; relations preserved)
-COPY public.users (id, full_name, email, tc_kimlik, phone, salary, birth_date) FROM stdin;
-757782	Brad Wagner	jeffrey20@hillhouse.org	49281729482	001-921-726-3167x532	87858.16	1988-03-28
-356338	William Martinez	sbates@heritage.com	78192039410	(441)558-4260	105249.27	1985-08-27
+-- Table: users (Names, Emails, TCKN, Phones, Salaries & Nested JSON masked; relations preserved)
+COPY public.users (id, full_name, email, tc_kimlik, phone, salary, raw_metadata) FROM stdin;
+757782	Brad Wagner	jeffrey20@hillhouse.org	49281729482	001-921-726-3167x532	87858.16	{"profile": {"contact_email": "jwoodard@hillhouse.org"}, "cards": [{"num": "****-****-****-5678"}]}
+356338	William Martinez	sbates@heritage.com	78192039410	(441)558-4260	105249.27	{"profile": {"contact_email": "martinez@heritage.com"}, "cards": [{"num": "****-****-****-9823"}]}
 \.
 
 -- Table: orders (Notice: user_id 1001 -> 757782 and 1002 -> 356338 are consistently matched!)
@@ -92,20 +93,18 @@ CloakDB uses a deterministic seed-derivation model to maintain data consistency:
 
 ---
 
-## 🇹🇷 Turkish Locale & TCKN Support
+## 🌐 Extended Dialect Support
 
-CloakDB includes dedicated support for Turkish schemas and validation algorithms:
+CloakDB natively handles syntax peculiarities across major relational database engines:
 
-- **Mathematical TCKN Algorithm:** Validates and generates 11-digit Turkish Republic ID numbers adhering to the official Modulo-10 and Modulo-11 checksum specifications.
-- **Turkish Schema Discovery:** Native recognition for Turkish column naming conventions:
-  - `ad`, `soyad`, `ad_soyad`, `musteri_adi`
-  - `tc_kimlik_no`, `tckn`, `tc_no`, `vergi_no`
-  - `eposta`, `e_posta`, `email_adresi`
-  - `telefon`, `cep_tel`, `cep_telefonu`, `iletisim_no`
-  - `adres`, `teslimat_adresi`, `fatura_adresi`, `sehir`, `ilce`
-  - `maas`, `bakiye`, `tutar`, `ucret`
-  - `sifre`, `parola`, `gizli_anahtar`
-- **Seeded `tr_TR` Synthetic Generator:** Produces realistic Turkish names, cities, districts, and phone numbers (`+90 5XX XXX XX XX`).
+| Dialect | Distinct Syntax Supported |
+| :--- | :--- |
+| **PostgreSQL** | `COPY ... FROM stdin`, `\N` null markers, multi-line `INSERT`, standard DDL |
+| **MySQL / MariaDB** | Backtick identifiers (`` `schema`.`table` ``), multi-row `INSERT INTO ... VALUES (), ()` |
+| **Microsoft SQL Server (T-SQL)** | Bracketed identifiers (`[dbo].[Customers]`), `N'...'` unicode string literals, `SET IDENTITY_INSERT ... ON/OFF`, `GO` batch delimiters |
+| **Oracle Database** | Quoted identifiers (`"HR"."EMPLOYEES"`), `REM` remarks, `PROMPT` statements, `SET DEFINE OFF` |
+| **SQLite** | Standard SQLite dumps and live SQLite `.db` file in-place masking |
+| **Flat Files** | CSV files and newline-delimited JSON (`.jsonl`) streams |
 
 ---
 
@@ -127,11 +126,8 @@ pip install -e ".[dev]"
 
 ### Step 1: Scan for sensitive data
 ```bash
-# Scan a PostgreSQL or MySQL dump and generate rules
+# Scan a SQL dump and generate rules
 cloakdb scan dump.sql --output cloakdb.yaml
-
-# Scan with Turkish locale heuristics
-cloakdb scan dump.sql --locale tr_TR --output cloakdb.yaml
 ```
 
 ### Step 2: Preview the transformation
@@ -139,9 +135,9 @@ cloakdb scan dump.sql --locale tr_TR --output cloakdb.yaml
 cloakdb preview -c cloakdb.yaml -i dump.sql
 ```
 
-### Step 3: Stream and apply masking
+### Step 3: Stream and apply masking (with multi-worker parallel parsing)
 ```bash
-cloakdb apply -c cloakdb.yaml -i dump.sql -o sanitized_dump.sql
+cloakdb apply -c cloakdb.yaml -i dump.sql -o sanitized_dump.sql --workers 4
 ```
 
 ---
@@ -154,7 +150,7 @@ Auto-scans a SQL dump, CSV, or live database URL and detects sensitive columns.
 # Scan a SQL dump file
 cloakdb scan production_dump.sql -o cloakdb.yaml
 
-# Scan a CSV file
+# Scan a CSV file with Turkish locale heuristics
 cloakdb scan customers.csv --locale tr_TR -o cloakdb.yaml
 
 # Scan a live database connection (PostgreSQL / MySQL / SQLite)
@@ -162,10 +158,10 @@ cloakdb scan "postgresql://user:pass@localhost:5432/proddb" -o cloakdb.yaml
 ```
 
 ### `cloakdb apply`
-Streams and masks input datasets or live tables.
+Streams and masks input datasets or live tables with optional multi-core workers.
 ```bash
-# Stream mask a SQL dump file
-cloakdb apply -c cloakdb.yaml -i dump.sql -o sanitized.sql
+# Stream mask a SQL dump using 4 parallel worker processes
+cloakdb apply -c cloakdb.yaml -i dump.sql -o sanitized.sql --workers 4
 
 # Dry-run validation without writing output
 cloakdb apply -c cloakdb.yaml -i dump.sql --dry-run
@@ -198,9 +194,6 @@ Runs an in-memory throughput benchmark across multi-column strategy workloads.
 cloakdb bench --rows 50000
 ```
 
-### `cloakdb version` / `cloakdb --version`
-Displays version and environment information.
-
 ---
 
 ## 📋 Configuration Guide (`cloakdb.yaml`)
@@ -230,15 +223,6 @@ consistency_groups:
       - "orders.user_id"
       - "audit_logs.user_id"
 
-  - name: "user_emails"
-    strategy: "faker"
-    params:
-      provider: "email"
-      preserve_domain: true
-    columns:
-      - "users.email"
-      - "audit_logs.actor_email"
-
 # Table Transformation Rules
 tables:
   users:
@@ -253,51 +237,33 @@ tables:
           provider: "first_name"
           deterministic: true
 
-      last_name:
-        strategy: "faker"
-        params:
-          provider: "last_name"
-          deterministic: true
-
       email:
         strategy: "faker"
         params:
           provider: "email"
-          preserve_domain: true           # Keeps original corporate email domain
-
-      phone:
-        strategy: "faker"
-        params:
-          provider: "phone_number"
+          preserve_domain: true
 
       credit_card:
         strategy: "credit_card_mask"
-        params:
-          mask_char: "*"
-
-      ssn:
-        strategy: "pattern_mask"
-        params:
-          keep_first: 0
-          keep_last: 4
-          mask_char: "*"
 
       salary:
         strategy: "jitter"
         params:
-          percentage: 10.0                # Adds +-10% Gaussian noise preserving distribution
-          distribution: "gaussian"
+          percentage: 10.0
 
-      birth_date:
-        strategy: "date_shift"
-        params:
-          max_days_forward: 30
-          max_days_backward: 30
-
-      password_hash:
-        strategy: "constant"
-        params:
-          value_to_set: "argon2$placeholder$masked"
+      # Nested JSON / JSONB Column Masking
+      raw_payload:
+        strategy: "json_mask"
+        rules:
+          "profile.contact_email":
+            strategy: "faker"
+            params:
+              provider: "email"
+              preserve_domain: true
+          "cards[*].num":
+            strategy: "credit_card_mask"
+          "internal_auth.*":
+            strategy: "nullify"
 
   orders:
     columns:
@@ -321,6 +287,7 @@ tables:
 
 | Strategy | Parameters | Sample Original | Masked Replacement |
 | :--- | :--- | :--- | :--- |
+| `json_mask` | `rules: {'path': rule}` | `{"user": {"email": "a@b.com"}}` | `{"user": {"email": "masked@b.com"}}` |
 | `deterministic_hash` | `as_integer: true, min_int: 10000` | `1048` | `84920` *(Preserved across tables)* |
 | `uuid_hash` | `salt: 'secret'` | `user-12345` | `e0a3f8c2-...` *(RFC 4122 v5 UUID)* |
 | `faker` | `provider: 'email', preserve_domain: true` | `john.doe@company.org` | `jwoodard@company.org` |
@@ -356,13 +323,6 @@ You can run the benchmark suite locally with any row count:
 ```bash
 cloakdb bench --rows 50000
 ```
-
----
-
-## ⚠️ Known Limitations
-
-- **Nested JSON Payloads:** CloakDB currently masks entire database column values. Masking specific nested keys inside arbitrary JSON/JSONB string payloads (e.g. `{"user": {"email": "..."}}`) is not currently supported (planned on [Roadmap](./ROADMAP.md)).
-- **Complex DDL Alterations:** Schema-altering operations and stored procedure definitions in SQL dumps are streamed through untouched without modification.
 
 ---
 

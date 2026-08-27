@@ -322,6 +322,9 @@ def apply(
     dry_run: bool = typer.Option(False, "--dry-run", help="Run masking without writing changes"),
     seed: int | None = typer.Option(None, "--seed", "-s", help="Override global seed"),
     locale: str | None = typer.Option(None, "--locale", "-l", help="Override Faker locale"),
+    workers: int = typer.Option(
+        1, "--workers", "-w", help="Number of parallel worker processes for stream parsing"
+    ),
 ) -> None:
     """Apply masking rules to an input file or live database stream."""
     config = load_config(config_file)
@@ -338,7 +341,8 @@ def apply(
             f"[cyan]Config:[/cyan] {config_file}\n"
             f"[cyan]Input:[/cyan] {input_target}\n"
             f"[cyan]Output:[/cyan] {output_target or '[Live In-Place]'}\n"
-            f"[cyan]Configured Tables:[/cyan] {len(config.tables)}",
+            f"[cyan]Configured Tables:[/cyan] {len(config.tables)}\n"
+            f"[cyan]Workers:[/cyan] {workers}",
             title="[bold green]Execution Plan[/bold green]",
             border_style="green",
         )
@@ -388,7 +392,7 @@ def apply(
 
         out_path = Path(output_target) if output_target else None
 
-        # Select stream parser based on extension
+        # Select stream parser based on extension and worker count
         parser: BaseStreamParser
         if in_path.suffix.lower() == ".csv":
             first_table = list(config.tables.keys())[0] if config.tables else "default"
@@ -396,6 +400,10 @@ def apply(
         elif in_path.suffix.lower() == ".jsonl":
             first_table = list(config.tables.keys())[0] if config.tables else "default"
             parser = JSONLinesStreamParser(table_name=first_table)
+        elif workers > 1:
+            from cloakdb.parsers.chunking import ParallelStreamParser
+
+            parser = ParallelStreamParser(workers=workers)
         else:
             parser = SQLDumpStreamParser()
 

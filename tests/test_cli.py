@@ -92,6 +92,30 @@ def test_cli_apply_sql(tmp_path: Path, postgres_dump_file: Path):
     assert "Completed Successfully" in res_apply.stdout
 
 
+def test_cli_apply_sql_parallel(tmp_path: Path, postgres_dump_file: Path):
+    config_file = tmp_path / "cloakdb.yaml"
+    runner.invoke(app, ["init", "-o", str(config_file)])
+
+    out_dump = tmp_path / "masked_par.sql"
+    res_apply = runner.invoke(
+        app,
+        [
+            "apply",
+            "-c",
+            str(config_file),
+            "-i",
+            str(postgres_dump_file),
+            "-o",
+            str(out_dump),
+            "--workers",
+            "2",
+        ],
+    )
+    assert res_apply.exit_code == 0
+    assert out_dump.exists()
+    assert "Completed Successfully" in res_apply.stdout
+
+
 def test_cli_apply_dry_run(tmp_path: Path, postgres_dump_file: Path):
     config_file = tmp_path / "cloakdb.yaml"
     runner.invoke(app, ["init", "-o", str(config_file)])

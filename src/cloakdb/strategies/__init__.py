@@ -3,6 +3,7 @@
 import cloakdb.strategies.datetime  # noqa: F401
 import cloakdb.strategies.general  # noqa: F401
 import cloakdb.strategies.hash  # noqa: F401
+import cloakdb.strategies.json  # noqa: F401
 import cloakdb.strategies.numeric  # noqa: F401
 import cloakdb.strategies.redaction  # noqa: F401
 import cloakdb.strategies.synthetic  # noqa: F401

@@ -11,18 +11,22 @@ from cloakdb.parsers.base import BaseStreamParser
 
 # Regex patterns for SQL constructs
 _COPY_PATTERN = re.compile(
-    r"^COPY\s+(?:(?P<schema>[\w\"]+)\.)?(?P<table>[\w\"]+)\s*\((?P<columns>[^\)]+)\)\s+FROM\s+stdin;",
+    r"^COPY\s+(?:(?P<schema>[\w\"`\[\]]+)\.)?(?P<table>[\w\"`\[\]]+)\s*\((?P<columns>[^\)]+)\)\s+FROM\s+stdin;",
     re.IGNORECASE,
 )
 
 _INSERT_HEADER_PATTERN = re.compile(
-    r"^INSERT\s+INTO\s+(?:(?P<schema>[\w\"`]+)\.)?(?P<table>[\w\"`]+)\s*(?:\((?P<columns>[^\)]+)\))?\s+VALUES\s*",
+    r"^INSERT\s+INTO\s+(?:(?P<schema>[\w\"`\[\]]+)\.)?(?P<table>[\w\"`\[\]]+)\s*(?:\((?P<columns>[^\)]+)\))?\s+VALUES\s*",
     re.IGNORECASE,
 )
 
 
 def _clean_identifier(ident: str) -> str:
-    return ident.strip().strip('"').strip("`").strip("[]")
+    ident = ident.strip()
+    if "." in ident:
+        parts = [p.strip().strip('"').strip("`").strip("[]") for p in ident.split(".")]
+        return parts[-1]
+    return ident.strip('"').strip("`").strip("[]")
 
 
 def _parse_column_list(cols_str: str) -> list[str]:
@@ -35,6 +39,9 @@ def _parse_sql_value(raw: str) -> Any:
         return None
     if raw.upper() in ("TRUE", "FALSE"):
         return raw.upper() == "TRUE"
+    # Support T-SQL N'...' unicode string literal prefix
+    if (raw.startswith("N'") or raw.startswith('N"')) and (raw.endswith("'") or raw.endswith('"')):
+        raw = raw[1:]
     if (raw.startswith("'") and raw.endswith("'")) or (raw.startswith('"') and raw.endswith('"')):
         # String literal: unescape SQL escapes
         content = raw[1:-1]
