@@ -14,6 +14,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [Why CloakDB](#-why-cloakdb) •
+[Demo](#-terminal-demo) •
 [Before / After](#-real-world-before--after-comparison) •
 [Consistency Model](#-consistency-model--referential-integrity) •
 [Quickstart](#-quickstart) •
@@ -22,6 +23,12 @@
 [Strategies](#-masking-strategies-catalog) •
 [Dialect Support](#-extended-dialect-support) •
 [Benchmarks](#-benchmarks)
+
+<br/>
+
+### 🎬 Terminal Demo
+
+![CloakDB Terminal Demo](./assets/demo.gif)
 
 </div>
 
