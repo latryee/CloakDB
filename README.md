@@ -3,20 +3,23 @@
 # 🛡️ CloakDB
 
 **High-performance, deterministic database & SQL dump anonymization CLI.**  
-*Sanitize production databases and multi-gigabyte SQL dumps for GDPR, KVKK, HIPAA compliance with zero memory explosion.*
+*Sanitize production databases and multi-gigabyte SQL dumps for KVKK, GDPR, and HIPAA compliance with zero memory explosion.*
+
+![CloakDB Social Banner](./assets/social_preview.png)
 
 [![CI](https://github.com/latryee/CloakDB/actions/workflows/ci.yml/badge.svg)](https://github.com/latryee/CloakDB/actions)
-[![Python Version](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://pypi.org/project/cloakdb/)
+[![Python Version](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/latryee/CloakDB)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 
+[Before / After](#-real-world-before--after-comparison) •
 [Features](#-key-engineering-highlights) •
+[Turkish & TCKN Support](#-first-class-turkish-locale--tckn-support) •
 [Quickstart](#-quickstart) •
 [CLI Commands](#-cli-commands-reference) •
-[Masking Strategies](#-masking-strategies-catalog) •
-[Architecture](#-architecture) •
-[Benchmarks](#-benchmarks)
+[Masking Catalog](#-masking-strategies-catalog) •
+[Compliance & Disclaimer](#-compliance-framework--legal-disclaimer)
 
 </div>
 
@@ -24,15 +27,72 @@
 
 ## 💡 Why CloakDB?
 
-Creating realistic staging and testing databases from production dumps is painful:
+Creating realistic staging and testing databases from production dumps is notoriously painful:
 - **Foreign Key Breakage:** Naive random fakers break foreign keys across related tables (`users.id` no longer matches `orders.user_id`).
 - **RAM Bloat:** Most tools parse SQL dumps in-memory, crashing with `OOM Killer` on multi-gigabyte dumps.
 - **Manual Configuration Nightmare:** Inspecting hundreds of schema columns manually to write masking rules takes days.
 
 **CloakDB** was built from the ground up to solve these problems with modern software engineering rigor:
-1. **Deterministic Referential Integrity:** Primary and foreign keys are pseudonymized using keyed HMAC hashing or bounded state caching—relations stay 100% valid.
+1. **Deterministic Referential Integrity:** Primary and foreign keys are pseudonymized using keyed HMAC hashing or bounded LRU state caching—relations stay 100% valid.
 2. **Zero-RAM Streaming Pipeline:** Streams and transforms PostgreSQL `COPY` / `INSERT`, MySQL, SQLite, CSV, and JSONL dumps in constant memory (~40MB RAM).
 3. **Smart PII Auto-Scanner (`cloakdb scan`):** Automatically detects PII (Emails, Phones, Credit Cards with Luhn verification, Turkish TCKN, SSN, IBAN, IP Addresses, High-entropy secrets) and writes production-ready configuration in seconds.
+
+---
+
+## 🔄 Real-World Before / After Comparison
+
+CloakDB masks PII while **preserving relational integrity** (e.g. `users.id` matches `orders.user_id`), retaining email corporate domains, and keeping numerical/date statistical distributions:
+
+### 🔴 Before (Raw Production SQL Dump)
+```sql
+-- Table: users
+COPY public.users (id, full_name, email, tc_kimlik, phone, salary, birth_date) FROM stdin;
+1001	Eleanor Vance	eleanor.vance@hillhouse.org	10000000146	+1-555-0199	95000.00	1988-04-12
+1002	Luke Sanderson	luke.sanderson@heritage.com	23854910284	+1-555-0142	115000.50	1985-09-23
+\.
+
+-- Table: orders (user_id is a Foreign Key referencing users.id)
+INSERT INTO public.orders (id, user_id, order_total, shipping_address, customer_notes) VALUES 
+(501, 1001, 149.99, '742 Evergreen Terrace, Springfield, OR', 'Door code is 4920'),
+(502, 1002, 349.50, '221B Baker Street, London, UK', 'Call Luke at 555-0142 upon arrival');
+
+-- Table: audit_logs
+INSERT INTO public.audit_logs (id, user_id, raw_payload) VALUES
+(1, 1001, '{"action": "login", "password_attempt": "SecretPass123!"}');
+```
+
+### 🟢 After (CloakDB Sanitized Dump)
+```sql
+-- Table: users (Names, Emails, TCKN, Phones & Salaries masked; relations preserved)
+COPY public.users (id, full_name, email, tc_kimlik, phone, salary, birth_date) FROM stdin;
+757782	Brad Wagner	jeffrey20@hillhouse.org	49281729482	001-921-726-3167x532	87858.16	1988-03-28
+356338	William Martinez	sbates@heritage.com	78192039410	(441)558-4260	105249.27	1985-08-27
+\.
+
+-- Table: orders (⚡ Notice: user_id 1001 -> 757782 and 1002 -> 356338 are consistently matched!)
+INSERT INTO public.orders (id, user_id, order_total, shipping_address, customer_notes) VALUES 
+(501, 757782, 149.99, '7123 Saunders Road, South Nicholas, ME', 'Notes redacted for privacy compliance'),
+(502, 356338, 349.50, '46398 Emily View, Banksshire, CT', 'Notes redacted for privacy compliance');
+
+-- Table: audit_logs (Truncated completely as configured)
+```
+
+---
+
+## 🇹🇷 First-Class Turkish Locale & TCKN Support
+
+CloakDB includes dedicated support for Turkish schemas, compliance practices (KVKK), and localized validation:
+
+- **Mathematical TCKN Algorithm:** Validates and generates 11-digit Turkish Republic ID numbers adhering strictly to the official Modulo-10 and Modulo-11 checksum algorithms.
+- **Turkish Schema Auto-Discovery:** Native heuristic recognition for Turkish column naming conventions:
+  - `ad`, `soyad`, `ad_soyad`, `musteri_adi`
+  - `tc_kimlik_no`, `tckn`, `tc_no`, `vergi_no`
+  - `eposta`, `e_posta`, `email_adresi`
+  - `telefon`, `cep_tel`, `cep_telefonu`, `iletisim_no`
+  - `adres`, `teslimat_adresi`, `fatura_adresi`, `sehir`, `ilce`
+  - `maas`, `bakiye`, `tutar`, `ucret`
+  - `sifre`, `parola`, `gizli_anahtar`
+- **Seeded `tr_TR` Synthetic Generator:** Produces realistic Turkish names, cities, districts, and phone numbers (`+90 5XX XXX XX XX`).
 
 ---
 
@@ -61,8 +121,8 @@ Creating realistic staging and testing databases from production dumps is painfu
                           └──────────────────────────┘
 ```
 
-- **⚡ Blazing Speed:** Over **60,000+ cells/sec** throughput with single-core processing.
-- **🔒 Cryptographic Determinism:** Seeded HMAC-SHA256 ensures same inputs map to consistent pseudonyms across distributed files.
+- **⚡ Blazing Speed:** Over **60,000+ cells/sec** throughput with single-thread streaming.
+- **🔒 Cryptographic Determinism:** Seeded HMAC-SHA256 ensures identical inputs map to consistent pseudonyms across tables and distributed files.
 - **🎯 17+ Masking Strategies:** Seeded Faker, regex redaction, Gaussian noise jitter, date shifts, TCKN generation, credit card masking, and more.
 - **🧪 Production Ready:** 100% automated test coverage, strict typing, Pydantic v2 validation, and cross-platform compatibility (Windows, Linux, macOS).
 
@@ -71,14 +131,15 @@ Creating realistic staging and testing databases from production dumps is painfu
 ## 📦 Installation
 
 ```bash
-# Clone repository
+# Option 1: Install directly from GitHub (Recommended)
+pip install git+https://github.com/latryee/CloakDB.git
+
+# Option 2: Clone repository & install in editable mode
 git clone https://github.com/latryee/CloakDB.git
 cd CloakDB
-
-# Install in editable mode
 pip install -e .
 
-# Or install with dev dependencies
+# Or install with development and testing dependencies
 pip install -e ".[dev]"
 ```
 
@@ -88,7 +149,11 @@ pip install -e ".[dev]"
 
 ### Step 1: Scan your database or dump for PII
 ```bash
+# Scan a PostgreSQL / MySQL dump and generate cloakdb.yaml
 cloakdb scan dump.sql --output cloakdb.yaml
+
+# Scan with Turkish locale heuristics
+cloakdb scan dump.sql --locale tr_TR --output cloakdb.yaml
 ```
 *CloakDB analyzes your schema, runs regex, entropy, and checksum algorithms, and produces a complete, annotated `cloakdb.yaml` config.*
 
@@ -286,9 +351,22 @@ tables:
 
 ---
 
+## ⚖️ Compliance Framework & Legal Disclaimer
+
+CloakDB implements technical data protection controls aligned with major privacy frameworks:
+
+- **KVKK (6698 Sayılı Kanun):** Aligned with **Madde 12** (Veri Güvenliğine İlişkin Yükümlülükler) and the KVKK Kurumu *Kişisel Verilerin Silinmesi, Yok Edilmesi veya Anonim Hale Getirilmesi Rehberi* through masking, substitution, and k-anonymity generalization.
+- **GDPR (EU 2016/679):** Supports **Article 4(5)** (Pseudonymisation), **Article 25** (Data Protection by Design & Default), and **Article 32(1)(a)** (Security of Processing).
+- **HIPAA (45 CFR § 164.514):** Provides transformations addressing the 18 identifier categories under the HIPAA Safe Harbor de-identification standard.
+
+> ⚠️ **Compliance Disclaimer:**  
+> CloakDB is an open-source technical data masking and pseudonymization tool. Utilizing CloakDB assists technical teams in staging and test sanitization, but does **not** by itself guarantee full legal compliance with KVKK, GDPR, HIPAA, or other regulatory requirements. Data controllers must implement appropriate organizational policies, manage cryptographic salts securely, evaluate re-identification risks in context, and consult qualified legal counsel.
+
+---
+
 ## 📊 Benchmarks
 
-Benchmark executed on standard consumer hardware (AMD Ryzen / Intel Core):
+Benchmark executed on standard hardware (AMD Ryzen / Intel Core):
 
 ```
 +-------------------------------------------------------------+
