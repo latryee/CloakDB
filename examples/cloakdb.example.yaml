@@ -1,0 +1,129 @@
+# ==============================================================================
+# CloakDB Configuration Blueprint
+# Production-ready database masking & PII sanitization specification
+# ==============================================================================
+
+version: "1"
+
+# Global runtime parameters
+global:
+  # PRNG seed ensures 100% reproducible synthetic generation across runs
+  seed: 42
+
+  # Secret salt for keyed HMAC-SHA256 deterministic pseudo-identifiers
+  salt: "${CLOAK_SECRET_SALT:cloakdb-production-salt-v1}"
+
+  # Faker locale (en_US, tr_TR, de_DE, fr_FR, es_ES, etc.)
+  locale: "en_US"
+
+  # Chunk batch size for streaming file and live database execution
+  batch_size: 5000
+
+  # Maintain in-memory LRU cache to guarantee identical pseudonyms for repeat values
+  cache_pseudonyms: true
+  max_cache_size: 500000
+
+# Referential Integrity Groups: Guarantees matching foreign key pseudonyms
+consistency_groups:
+  - name: "user_identifiers"
+    strategy: "deterministic_hash"
+    params:
+      as_integer: true
+      min_int: 100000
+      max_int: 999999
+    columns:
+      - "users.id"
+      - "orders.user_id"
+      - "audit_logs.user_id"
+
+# Table Masking Rules
+tables:
+  users:
+    columns:
+      # Deterministic User ID mapped to preserve foreign keys
+      id:
+        strategy: "deterministic_hash"
+        consistency_group: "user_identifiers"
+
+      # Synthetic First & Last Names
+      first_name:
+        strategy: "faker"
+        params:
+          provider: "first_name"
+          deterministic: true
+
+      last_name:
+        strategy: "faker"
+        params:
+          provider: "last_name"
+          deterministic: true
+
+      # Anonymized email while preserving original corporate domain
+      email:
+        strategy: "faker"
+        params:
+          provider: "email"
+          preserve_domain: true
+
+      # Phone number generation
+      phone:
+        strategy: "faker"
+        params:
+          provider: "phone_number"
+
+      # Partial redaction for SSN: ***-**-1234
+      ssn:
+        strategy: "pattern_mask"
+        params:
+          keep_first: 0
+          keep_last: 4
+          mask_char: "*"
+
+      # Credit card format: ****-****-****-1234
+      credit_card:
+        strategy: "credit_card_mask"
+        params:
+          mask_char: "*"
+
+      # Gaussian noise (+-12%) preserving statistical distribution and mean
+      salary:
+        strategy: "jitter"
+        params:
+          percentage: 12.0
+          distribution: "gaussian"
+
+      # Date shift (+-45 days) maintaining chronological interval
+      birth_date:
+        strategy: "date_shift"
+        params:
+          max_days_forward: 45
+          max_days_backward: 45
+
+      # Anonymized IPv4 addresses
+      ip_address:
+        strategy: "faker"
+        params:
+          provider: "ipv4"
+
+  orders:
+    columns:
+      # Mapped to match users.id pseudonym consistently
+      user_id:
+        strategy: "deterministic_hash"
+        consistency_group: "user_identifiers"
+
+      # Synthetic realistic street addresses
+      shipping_address:
+        strategy: "faker"
+        params:
+          provider: "address"
+
+      # Redact free-form customer notes
+      customer_notes:
+        strategy: "constant"
+        params:
+          value_to_set: "Notes redacted for privacy compliance"
+
+  # Truncate sensitive audit trail table completely
+  audit_logs:
+    truncate: true
