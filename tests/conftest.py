@@ -1,7 +1,8 @@
 """Pytest fixtures, sample database dumps, and mock data."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 SAMPLE_POSTGRES_DUMP = """
 -- PostgreSQL database dump
@@ -35,7 +36,7 @@ CREATE TABLE public.orders (
     shipping_address text
 );
 
-INSERT INTO public.orders (id, user_id, order_total, shipping_address) VALUES 
+INSERT INTO public.orders (id, user_id, order_total, shipping_address) VALUES
 (101, 1, 149.99, '742 Evergreen Terrace, Springfield'),
 (102, 2, 299.50, '221B Baker Street, London'),
 (103, 1, 49.00, '742 Evergreen Terrace, Springfield');
@@ -51,7 +52,7 @@ CREATE TABLE `customers` (
   PRIMARY KEY (`id`)
 );
 
-INSERT INTO `customers` (`id`, `email`, `ssn`, `secret_token`) VALUES 
+INSERT INTO `customers` (`id`, `email`, `ssn`, `secret_token`) VALUES
 (1, 'customer1@test.com', '123-45-6789', 'secret_abc_123'),
 (2, 'customer2@test.com', '987-65-4321', 'secret_xyz_789');
 """

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, IO, List, Optional, Tuple
+from collections.abc import Callable
+from typing import IO, Any
+
 from cloakdb.core.engine import CloakEngine
 from cloakdb.parsers.base import BaseStreamParser
 
@@ -20,10 +22,10 @@ _INSERT_HEADER_PATTERN = re.compile(
 
 
 def _clean_identifier(ident: str) -> str:
-    return ident.strip().strip('"').strip('`').strip('[]')
+    return ident.strip().strip('"').strip("`").strip("[]")
 
 
-def _parse_column_list(cols_str: str) -> List[str]:
+def _parse_column_list(cols_str: str) -> list[str]:
     return [_clean_identifier(c) for c in cols_str.split(",") if c.strip()]
 
 
@@ -65,13 +67,13 @@ def _format_sql_value(val: Any) -> str:
     return f"'{s}'"
 
 
-def _split_sql_values_row(values_clause: str) -> List[Tuple[int, int, str]]:
+def _split_sql_values_row(values_clause: str) -> list[tuple[int, int, str]]:
     """Splits a tuple '(val1, val2, ...)' into individual raw value tokens with their span positions."""
     s = values_clause.strip()
     if s.startswith("(") and s.endswith(")"):
         s = s[1:-1]
 
-    tokens: List[Tuple[int, int, str]] = []
+    tokens: list[tuple[int, int, str]] = []
     in_quote = False
     quote_char = ""
     is_escaped = False
@@ -119,7 +121,7 @@ def _split_sql_values_row(values_clause: str) -> List[Tuple[int, int, str]]:
     return tokens
 
 
-def _split_multiple_tuples(rest_clause: str) -> List[Tuple[int, int, str]]:
+def _split_multiple_tuples(rest_clause: str) -> list[tuple[int, int, str]]:
     """Splits multi-row insert clauses: (a, b), (c, d), (e, f); into individual tuple strings and spans."""
     tuples = []
     in_quote = False
@@ -181,16 +183,16 @@ class SQLDumpStreamParser(BaseStreamParser):
         input_stream: IO[str],
         output_stream: IO[str],
         engine: CloakEngine,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> None:
         in_copy_mode = False
         copy_table = ""
-        copy_columns: List[str] = []
+        copy_columns: list[str] = []
         copy_truncate = False
 
         in_insert_mode = False
         insert_table = ""
-        insert_columns: List[str] = []
+        insert_columns: list[str] = []
         insert_truncate = False
 
         row_count = 0
@@ -216,7 +218,7 @@ class SQLDumpStreamParser(BaseStreamParser):
                 raw_line = line[:-1] if has_newline else line
                 cells = raw_line.split("\t")
 
-                parsed_values = []
+                parsed_values: list[str | None] = []
                 for cell in cells:
                     if cell == r"\N":
                         parsed_values.append(None)
@@ -305,7 +307,9 @@ class SQLDumpStreamParser(BaseStreamParser):
                     col_names = _parse_column_list(cols_raw)
                 else:
                     tbl_rule = engine.get_table_rule(tbl_name)
-                    col_names = list(tbl_rule.columns.keys()) if (tbl_rule and tbl_rule.columns) else []
+                    col_names = (
+                        list(tbl_rule.columns.keys()) if (tbl_rule and tbl_rule.columns) else []
+                    )
 
                 insert_table = tbl_name
                 insert_columns = col_names
@@ -347,9 +351,9 @@ class SQLDumpStreamParser(BaseStreamParser):
     def _mask_tuples_in_string(
         self,
         raw_str: str,
-        tuples: List[Tuple[int, int, str]],
+        tuples: list[tuple[int, int, str]],
         table_name: str,
-        column_names: List[str],
+        column_names: list[str],
         engine: CloakEngine,
         row_start_index: int,
     ) -> str:

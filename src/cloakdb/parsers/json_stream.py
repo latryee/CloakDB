@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from typing import Callable, IO, Optional
+from collections.abc import Callable
+from typing import IO
+
 from cloakdb.core.engine import CloakEngine
 from cloakdb.parsers.base import BaseStreamParser
 
@@ -19,7 +21,7 @@ class JSONLinesStreamParser(BaseStreamParser):
         input_stream: IO[str],
         output_stream: IO[str],
         engine: CloakEngine,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> None:
         row_count = 0
         bytes_count = 0

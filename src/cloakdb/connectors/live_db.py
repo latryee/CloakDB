@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
+
 from sqlalchemy import MetaData, Table, create_engine, inspect, select, update
 from sqlalchemy.engine import Engine
+
 from cloakdb.connectors.base import BaseDatabaseConnector
 from cloakdb.core.engine import CloakEngine
 
@@ -17,21 +20,24 @@ class LiveDatabaseConnector(BaseDatabaseConnector):
         self.engine: Engine = create_engine(connection_url)
         self.metadata = MetaData()
 
-    def get_table_names(self) -> List[str]:
+    def get_table_names(self) -> list[str]:
         inspector = inspect(self.engine)
         return inspector.get_table_names()
 
-    def get_table_columns(self, table_name: str) -> List[Dict[str, Any]]:
+    def get_table_columns(self, table_name: str) -> list[dict[str, Any]]:
         inspector = inspect(self.engine)
         cols = inspector.get_columns(table_name)
-        return [{"name": c["name"], "type": str(c["type"]), "nullable": c.get("nullable", True)} for c in cols]
+        return [
+            {"name": c["name"], "type": str(c["type"]), "nullable": c.get("nullable", True)}
+            for c in cols
+        ]
 
-    def get_primary_keys(self, table_name: str) -> List[str]:
+    def get_primary_keys(self, table_name: str) -> list[str]:
         inspector = inspect(self.engine)
         pk = inspector.get_pk_constraint(table_name)
         return pk.get("constrained_columns", [])
 
-    def fetch_sample_rows(self, table_name: str, limit: int = 50) -> List[Dict[str, Any]]:
+    def fetch_sample_rows(self, table_name: str, limit: int = 50) -> list[dict[str, Any]]:
         """Fetches a sample of rows from a live table."""
         table = Table(table_name, self.metadata, autoload_with=self.engine)
         stmt = select(table).limit(limit)
@@ -44,13 +50,15 @@ class LiveDatabaseConnector(BaseDatabaseConnector):
         table_name: str,
         engine: CloakEngine,
         batch_size: int = 5000,
-        progress_callback: Optional[Callable[[int], None]] = None,
+        progress_callback: Callable[[int], None] | None = None,
     ) -> int:
         """Applies masking rules directly to a table in the database using primary key matching."""
         table = Table(table_name, self.metadata, autoload_with=self.engine)
         pks = self.get_primary_keys(table_name)
         if not pks:
-            raise ValueError(f"Table '{table_name}' does not have a primary key defined for in-place updates.")
+            raise ValueError(
+                f"Table '{table_name}' does not have a primary key defined for in-place updates."
+            )
 
         tbl_rule = engine.get_table_rule(table_name)
         if not tbl_rule or not tbl_rule.columns:
@@ -60,6 +68,7 @@ class LiveDatabaseConnector(BaseDatabaseConnector):
         stmt = select(table)
         if tbl_rule.where_clause:
             from sqlalchemy import text
+
             stmt = stmt.where(text(tbl_rule.where_clause))
 
         total_rows = 0
@@ -98,7 +107,7 @@ class LiveDatabaseConnector(BaseDatabaseConnector):
 
         return total_rows
 
-    def _flush_batch(self, conn: Any, table: Table, batch: List[tuple]) -> None:
+    def _flush_batch(self, conn: Any, table: Table, batch: list[tuple]) -> None:
         for pk_filter, update_dict in batch:
             stmt = update(table)
             for pk_col, pk_val in pk_filter.items():

@@ -1,7 +1,20 @@
 """Tests for LiveDatabaseConnector with SQLite."""
 
 from pathlib import Path
-from sqlalchemy import Column, Float, Integer, MetaData, String, Table, create_engine, insert, select
+
+import pytest
+from sqlalchemy import (
+    Column,
+    Float,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    insert,
+    select,
+)
+
 from cloakdb.config.models import CloakConfig, ColumnRule, TableRule
 from cloakdb.connectors.live_db import LiveDatabaseConnector
 from cloakdb.core.engine import CloakEngine
@@ -29,7 +42,12 @@ def test_live_db_masking(tmp_path: Path):
         conn.execute(
             insert(users_tbl),
             [
-                {"id": 1, "email": "alice@test.com", "full_name": "Alice Wonderland", "salary": 100000.0},
+                {
+                    "id": 1,
+                    "email": "alice@test.com",
+                    "full_name": "Alice Wonderland",
+                    "salary": 100000.0,
+                },
                 {"id": 2, "email": "bob@test.com", "full_name": "Bob Builder", "salary": 80000.0},
             ],
         )
@@ -41,7 +59,9 @@ def test_live_db_masking(tmp_path: Path):
             "users": TableRule(
                 columns={
                     "email": ColumnRule(strategy="email_mask"),
-                    "full_name": ColumnRule(strategy="constant", params={"value_to_set": "Redacted User"}),
+                    "full_name": ColumnRule(
+                        strategy="constant", params={"value_to_set": "Redacted User"}
+                    ),
                 }
             )
         },
@@ -49,6 +69,14 @@ def test_live_db_masking(tmp_path: Path):
 
     cloak_engine = CloakEngine(config)
     connector = LiveDatabaseConnector(db_url)
+
+    # Test schema inspection
+    tables = connector.get_table_names()
+    assert "users" in tables
+    cols = connector.get_table_columns("users")
+    assert len(cols) == 4
+    col_names = [c["name"] for c in cols]
+    assert "email" in col_names
 
     affected = connector.mask_table("users", cloak_engine, batch_size=10)
     assert affected == 2
@@ -61,3 +89,32 @@ def test_live_db_masking(tmp_path: Path):
         assert rows[1].full_name == "Redacted User"
         assert rows[0].email != "alice@test.com"
         assert "@test.com" in rows[0].email
+
+
+def test_live_db_no_pk_error(tmp_path: Path):
+    db_file = tmp_path / "nopk.db"
+    db_url = f"sqlite:///{db_file}"
+
+    engine = create_engine(db_url)
+    metadata = MetaData()
+
+    Table(
+        "logs",
+        metadata,
+        Column("message", String),
+    )
+    metadata.create_all(engine)
+
+    config = CloakConfig(
+        version="1",
+        tables={
+            "logs": TableRule(
+                columns={"message": ColumnRule(strategy="constant", params={"value_to_set": "X"})}
+            )
+        },
+    )
+    cloak_engine = CloakEngine(config)
+    connector = LiveDatabaseConnector(db_url)
+
+    with pytest.raises(ValueError, match="does not have a primary key defined"):
+        connector.mask_table("logs", cloak_engine)

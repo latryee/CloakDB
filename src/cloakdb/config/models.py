@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ColumnRule(BaseModel):
@@ -13,11 +14,11 @@ class ColumnRule(BaseModel):
         ...,
         description="Masking strategy identifier (e.g. 'faker', 'deterministic_hash', 'pattern_mask', 'jitter', 'nullify')",
     )
-    params: Dict[str, Any] = Field(
+    params: dict[str, Any] = Field(
         default_factory=dict,
         description="Strategy-specific parameters (e.g. provider='email', salt='secret', format='***')",
     )
-    condition: Optional[str] = Field(
+    condition: str | None = Field(
         default=None,
         description="Optional boolean Python/SQL expression condition to evaluate before masking",
     )
@@ -25,7 +26,7 @@ class ColumnRule(BaseModel):
         default=True,
         description="If True, existing NULL/None values will not be altered",
     )
-    consistency_group: Optional[str] = Field(
+    consistency_group: str | None = Field(
         default=None,
         description="Group name to maintain referential consistency across foreign keys",
     )
@@ -39,11 +40,11 @@ class ColumnRule(BaseModel):
 class TableRule(BaseModel):
     """Masking rules for a database table."""
 
-    columns: Dict[str, ColumnRule] = Field(
+    columns: dict[str, ColumnRule] = Field(
         default_factory=dict,
         description="Map of column name to masking rule",
     )
-    where_clause: Optional[str] = Field(
+    where_clause: str | None = Field(
         default=None,
         description="Optional WHERE clause filter for live database processing",
     )
@@ -57,7 +58,7 @@ class ConsistencyGroup(BaseModel):
     """Defines a relationship where multiple columns across tables share deterministic pseudonyms."""
 
     name: str = Field(..., description="Unique name of the consistency group")
-    columns: List[str] = Field(
+    columns: list[str] = Field(
         ...,
         description="List of 'table.column' references that must mask to identical pseudonyms",
     )
@@ -65,7 +66,7 @@ class ConsistencyGroup(BaseModel):
         default="deterministic_hash",
         description="Strategy to use for this consistency group",
     )
-    params: Dict[str, Any] = Field(
+    params: dict[str, Any] = Field(
         default_factory=dict,
         description="Parameters for the group strategy",
     )
@@ -74,7 +75,7 @@ class ConsistencyGroup(BaseModel):
 class GlobalConfig(BaseModel):
     """Global runtime settings for the anonymization engine."""
 
-    seed: Optional[int] = Field(
+    seed: int | None = Field(
         default=42,
         description="Global PRNG seed for reproducible synthetic data generation",
     )
@@ -111,16 +112,16 @@ class CloakConfig(BaseModel):
         alias="global",
         description="Global engine parameters",
     )
-    tables: Dict[str, TableRule] = Field(
+    tables: dict[str, TableRule] = Field(
         default_factory=dict,
         description="Rules per table name",
     )
-    consistency_groups: List[ConsistencyGroup] = Field(
+    consistency_groups: list[ConsistencyGroup] = Field(
         default_factory=list,
         description="Referential integrity consistency groups",
     )
 
-    model_config = {
-        "populate_by_name": True,
-        "extra": "ignore",
-    }
+    model_config = ConfigDict(
+        populate_by_name=True,
+        extra="ignore",
+    )

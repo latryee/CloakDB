@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
 import random
-from typing import Any, Optional, Union
+from datetime import date, datetime, timedelta
+from typing import Any
+
 from cloakdb.core.context import TransformationContext
 from cloakdb.strategies.base import MaskingStrategy
 from cloakdb.strategies.registry import register_strategy
 
 
-def _parse_datetime(val: Any) -> Optional[Union[datetime, date]]:
+def _parse_datetime(val: Any) -> datetime | date | None:
     """Attempts to parse string/date/datetime inputs flexibly."""
     if isinstance(val, (datetime, date)):
         return val

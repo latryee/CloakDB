@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from cloakdb.config.models import ConsistencyGroup
 
 
@@ -14,7 +15,7 @@ class LRUCache:
         self.capacity = capacity
         self._cache: OrderedDict[Any, Any] = OrderedDict()
 
-    def get(self, key: Any) -> Optional[Any]:
+    def get(self, key: Any) -> Any | None:
         if key not in self._cache:
             return None
         self._cache.move_to_end(key)
@@ -43,7 +44,7 @@ class ReferentialIntegrityManager:
 
     def __init__(
         self,
-        groups: Optional[List[ConsistencyGroup]] = None,
+        groups: list[ConsistencyGroup] | None = None,
         max_cache_size: int = 500000,
         cache_enabled: bool = True,
     ):
@@ -52,11 +53,11 @@ class ReferentialIntegrityManager:
         self.max_cache_size = max_cache_size
 
         # Map 'table.column' -> group_name
-        self._column_to_group: Dict[str, str] = {}
+        self._column_to_group: dict[str, str] = {}
         # Map group_name -> ConsistencyGroup
-        self._group_definitions: Dict[str, ConsistencyGroup] = {}
+        self._group_definitions: dict[str, ConsistencyGroup] = {}
         # Map group_name -> LRUCache
-        self._group_caches: Dict[str, LRUCache] = {}
+        self._group_caches: dict[str, LRUCache] = {}
 
         self._initialize_groups()
 
@@ -69,10 +70,10 @@ class ReferentialIntegrityManager:
                 self._column_to_group[normalized] = group.name
 
     def _normalize_column_ref(self, col_ref: str) -> str:
-        parts = [p.strip().strip('"').strip('`').strip('[]').lower() for p in col_ref.split(".")]
+        parts = [p.strip().strip('"').strip("`").strip("[]").lower() for p in col_ref.split(".")]
         return ".".join(parts)
 
-    def get_group_for_column(self, table_name: str, column_name: str) -> Optional[ConsistencyGroup]:
+    def get_group_for_column(self, table_name: str, column_name: str) -> ConsistencyGroup | None:
         """Returns the ConsistencyGroup for a given table and column if registered."""
         ref = self._normalize_column_ref(f"{table_name}.{column_name}")
         group_name = self._column_to_group.get(ref)
@@ -80,7 +81,7 @@ class ReferentialIntegrityManager:
             return self._group_definitions.get(group_name)
         return None
 
-    def get_cached_value(self, group_name: str, raw_value: Any) -> Optional[Any]:
+    def get_cached_value(self, group_name: str, raw_value: Any) -> Any | None:
         """Retrieves a previously computed pseudonym for a group and raw value."""
         if not self.cache_enabled:
             return None

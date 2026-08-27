@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import time
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -16,7 +16,7 @@ class MaskingStats:
     cells_masked: int = 0
     bytes_processed: int = 0
     start_time: float = field(default_factory=time.perf_counter)
-    end_time: Optional[float] = None
+    end_time: float | None = None
 
     @property
     def elapsed_seconds(self) -> float:
@@ -39,15 +39,15 @@ class TransformationContext:
     table_name: str
     column_name: str
     row_index: int
-    row_data: Dict[str, Any] = field(default_factory=dict)
-    seed: Optional[int] = 42
+    row_data: dict[str, Any] = field(default_factory=dict)
+    seed: int | None = 42
     salt: str = "cloakdb-salt"
     locale: str = "en_US"
-    group_name: Optional[str] = None
+    group_name: str | None = None
     stats: MaskingStats = field(default_factory=MaskingStats)
-    custom_state: Dict[str, Any] = field(default_factory=dict)
+    custom_state: dict[str, Any] = field(default_factory=dict)
 
-    def derive_seed(self, value: Any = None, scope: Optional[str] = None) -> int:
+    def derive_seed(self, value: Any = None, scope: str | None = None) -> int:
         """Derives a deterministic 64-bit integer seed.
 
         Scopes:
@@ -60,7 +60,9 @@ class TransformationContext:
         """
         import hashlib
 
-        effective_scope = (scope.lower().strip() if scope else ("group" if self.group_name else "column"))
+        effective_scope = (
+            scope.lower().strip() if scope else ("group" if self.group_name else "column")
+        )
 
         h = hashlib.sha256()
         h.update(self.salt.encode("utf-8"))
@@ -69,7 +71,7 @@ class TransformationContext:
             pass
         elif effective_scope == "group":
             grp = self.group_name or "default_group"
-            h.update(f"group:{grp}".encode("utf-8"))
+            h.update(f"group:{grp}".encode())
         else:  # "column"
             h.update(self.table_name.encode("utf-8"))
             h.update(self.column_name.encode("utf-8"))

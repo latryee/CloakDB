@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+
 import typer
 from rich import box
 from rich.panel import Panel
@@ -13,10 +13,11 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeEl
 from rich.table import Table
 
 from cloakdb import __version__
-from cloakdb.config.loader import dump_config_to_yaml, load_config, save_config
+from cloakdb.config.loader import load_config, save_config
 from cloakdb.config.models import CloakConfig, ColumnRule, GlobalConfig, TableRule
 from cloakdb.connectors.live_db import LiveDatabaseConnector
 from cloakdb.core.engine import CloakEngine
+from cloakdb.parsers.base import BaseStreamParser
 from cloakdb.parsers.csv_stream import CSVStreamParser
 from cloakdb.parsers.json_stream import JSONLinesStreamParser
 from cloakdb.parsers.sql_dump import SQLDumpStreamParser
@@ -33,12 +34,43 @@ app = typer.Typer(
 )
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(
+            f"[bold magenta]CloakDB[/bold magenta] version [bold cyan]{__version__}[/bold cyan]"
+        )
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool | None = typer.Option(
+        None,
+        "--version",
+        "-V",
+        help="Show version and exit.",
+        callback=_version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """High-performance, deterministic database & SQL dump anonymization CLI."""
+    pass
+
+
 @app.command()
 def scan(
-    target: str = typer.Argument(..., help="Path to SQL dump (.sql), CSV (.csv), or DB connection URL"),
-    output: Optional[str] = typer.Option(None, "--output", "-o", help="Save generated configuration to YAML file"),
-    locale: str = typer.Option("en_US", "--locale", "-l", help="Faker locale (e.g. en_US, tr_TR, de_DE)"),
-    max_samples: int = typer.Option(500, "--max-samples", "-n", help="Max sample lines/rows to inspect"),
+    target: str = typer.Argument(
+        ..., help="Path to SQL dump (.sql), CSV (.csv), or DB connection URL"
+    ),
+    output: str | None = typer.Option(
+        None, "--output", "-o", help="Save generated configuration to YAML file"
+    ),
+    locale: str = typer.Option(
+        "en_US", "--locale", "-l", help="Faker locale (e.g. en_US, tr_TR, de_DE)"
+    ),
+    max_samples: int = typer.Option(
+        500, "--max-samples", "-n", help="Max sample lines/rows to inspect"
+    ),
 ) -> None:
     """Scan a SQL dump, CSV file, or live database to auto-detect PII and generate rules."""
     generator = ConfigGenerator()
@@ -65,7 +97,9 @@ def scan(
         return
 
     total_detected_cols = sum(len(cols) for cols in detections.values())
-    console.print(f"\n[bold green][+] Found {total_detected_cols} sensitive columns across {len(detections)} tables:[/bold green]\n")
+    console.print(
+        f"\n[bold green][+] Found {total_detected_cols} sensitive columns across {len(detections)} tables:[/bold green]\n"
+    )
 
     for tbl_name, results in detections.items():
         table = Table(title=f"Table: [bold magenta]{tbl_name}[/bold magenta]", box=box.ROUNDED)
@@ -94,20 +128,30 @@ def scan(
     if output:
         out_path = Path(output)
         save_config(generated_config, out_path)
-        console.print(f"[bold green][+] Generated configuration saved to:[/bold green] [bold white]{out_path.resolve()}[/bold white]")
+        console.print(
+            f"[bold green][+] Generated configuration saved to:[/bold green] [bold white]{out_path.resolve()}[/bold white]"
+        )
     else:
-        console.print("[dim]Tip: Pass '--output cloakdb.yaml' to save these rules directly to a config file.[/dim]")
+        console.print(
+            "[dim]Tip: Pass '--output cloakdb.yaml' to save these rules directly to a config file.[/dim]"
+        )
 
 
 @app.command()
 def init(
-    output: str = typer.Option("cloakdb.yaml", "--output", "-o", help="Target configuration file path"),
-    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing configuration file"),
+    output: str = typer.Option(
+        "cloakdb.yaml", "--output", "-o", help="Target configuration file path"
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Overwrite existing configuration file"
+    ),
 ) -> None:
     """Generate a starter CloakDB configuration file with best-practice examples."""
     out_path = Path(output)
     if out_path.exists() and not force:
-        err_console.print(f"[bold red]Error:[/bold red] '{output}' already exists. Use '--force' to overwrite.")
+        err_console.print(
+            f"[bold red]Error:[/bold red] '{output}' already exists. Use '--force' to overwrite."
+        )
         raise typer.Exit(1)
 
     template_config = CloakConfig(
@@ -174,25 +218,34 @@ def init(
     )
 
     save_config(template_config, out_path)
-    console.print(f"[bold green][+] Created starter configuration at:[/bold green] [bold white]{out_path.resolve()}[/bold white]")
-    console.print("[dim]Customize the rules in this file and run 'cloakdb apply -c cloakdb.yaml -i dump.sql -o masked.sql'[/dim]")
+    console.print(
+        f"[bold green][+] Created starter configuration at:[/bold green] [bold white]{out_path.resolve()}[/bold white]"
+    )
+    console.print(
+        "[dim]Customize the rules in this file and run 'cloakdb apply -c cloakdb.yaml -i dump.sql -o masked.sql'[/dim]"
+    )
 
 
 @app.command()
 def preview(
     config_file: str = typer.Option(..., "--config", "-c", help="Path to cloakdb.yaml config file"),
-    input_file: str = typer.Option(..., "--input", "-i", help="Path to sample SQL dump, CSV, or DB URL"),
+    input_file: str = typer.Option(
+        ..., "--input", "-i", help="Path to sample SQL dump, CSV, or DB URL"
+    ),
     limit: int = typer.Option(5, "--limit", "-n", help="Number of sample records to preview"),
 ) -> None:
     """Preview side-by-side Before/After masking diffs on sample data."""
     config = load_config(config_file)
     engine = CloakEngine(config)
 
-    console.print(f"[bold cyan]Previewing masking transformations with config:[/bold cyan] {config_file}\n")
+    console.print(
+        f"[bold cyan]Previewing masking transformations with config:[/bold cyan] {config_file}\n"
+    )
 
     if input_file.endswith(".csv"):
         import csv
-        with open(input_file, "r", encoding="utf-8", errors="replace") as f:
+
+        with open(input_file, encoding="utf-8", errors="replace") as f:
             reader = csv.reader(f)
             header = next(reader, None)
             if not header:
@@ -244,7 +297,9 @@ def preview(
             for res in results:
                 for sample in res.sample_matches[:2]:
                     # Mock transformation
-                    masked_val = engine.mask_record(tbl_name, {res.column_name: sample}).get(res.column_name)
+                    masked_val = engine.mask_record(tbl_name, {res.column_name: sample}).get(
+                        res.column_name
+                    )
                     table.add_row(f"{tbl_name}.{res.column_name}", str(sample), str(masked_val))
 
         console.print(table)
@@ -252,12 +307,21 @@ def preview(
 
 @app.command()
 def apply(
-    config_file: str = typer.Option(..., "--config", "-c", help="Path to cloakdb.yaml configuration"),
-    input_target: str = typer.Option(..., "--input", "-i", help="Input SQL dump (.sql), CSV (.csv), JSONL (.jsonl), or live DB URL"),
-    output_target: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path (required for file streams)"),
+    config_file: str = typer.Option(
+        ..., "--config", "-c", help="Path to cloakdb.yaml configuration"
+    ),
+    input_target: str = typer.Option(
+        ...,
+        "--input",
+        "-i",
+        help="Input SQL dump (.sql), CSV (.csv), JSONL (.jsonl), or live DB URL",
+    ),
+    output_target: str | None = typer.Option(
+        None, "--output", "-o", help="Output file path (required for file streams)"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Run masking without writing changes"),
-    seed: Optional[int] = typer.Option(None, "--seed", "-s", help="Override global seed"),
-    locale: Optional[str] = typer.Option(None, "--locale", "-l", help="Override Faker locale"),
+    seed: int | None = typer.Option(None, "--seed", "-s", help="Override global seed"),
+    locale: str | None = typer.Option(None, "--locale", "-l", help="Override Faker locale"),
 ) -> None:
     """Apply masking rules to an input file or live database stream."""
     config = load_config(config_file)
@@ -268,15 +332,17 @@ def apply(
 
     engine = CloakEngine(config)
 
-    console.print(Panel(
-        f"[bold white]CloakDB Masking Engine v{__version__}[/bold white]\n"
-        f"[cyan]Config:[/cyan] {config_file}\n"
-        f"[cyan]Input:[/cyan] {input_target}\n"
-        f"[cyan]Output:[/cyan] {output_target or '[Live In-Place]'}\n"
-        f"[cyan]Configured Tables:[/cyan] {len(config.tables)}",
-        title="[bold green]Execution Plan[/bold green]",
-        border_style="green",
-    ))
+    console.print(
+        Panel(
+            f"[bold white]CloakDB Masking Engine v{__version__}[/bold white]\n"
+            f"[cyan]Config:[/cyan] {config_file}\n"
+            f"[cyan]Input:[/cyan] {input_target}\n"
+            f"[cyan]Output:[/cyan] {output_target or '[Live In-Place]'}\n"
+            f"[cyan]Configured Tables:[/cyan] {len(config.tables)}",
+            title="[bold green]Execution Plan[/bold green]",
+            border_style="green",
+        )
+    )
 
     start_time = time.perf_counter()
 
@@ -296,25 +362,34 @@ def apply(
 
             for tbl in tables:
                 if engine.get_table_rule(tbl):
-                    progress.update(task, description=f"Masking table [bold magenta]{tbl}[/bold magenta]...")
+                    progress.update(
+                        task, description=f"Masking table [bold magenta]{tbl}[/bold magenta]..."
+                    )
                     if not dry_run:
-                        connector.mask_table(tbl, engine, batch_size=config.global_settings.batch_size)
+                        connector.mask_table(
+                            tbl, engine, batch_size=config.global_settings.batch_size
+                        )
                 progress.advance(task)
 
     # Case 2: File Stream (SQL Dump, CSV, JSONL)
     else:
         in_path = Path(input_target)
         if not in_path.exists():
-            err_console.print(f"[bold red]Error:[/bold red] Input file '{input_target}' does not exist.")
+            err_console.print(
+                f"[bold red]Error:[/bold red] Input file '{input_target}' does not exist."
+            )
             raise typer.Exit(1)
 
         if not dry_run and not output_target:
-            err_console.print("[bold red]Error:[/bold red] Output path (--output / -o) is required for file streams.")
+            err_console.print(
+                "[bold red]Error:[/bold red] Output path (--output / -o) is required for file streams."
+            )
             raise typer.Exit(1)
 
         out_path = Path(output_target) if output_target else None
 
         # Select stream parser based on extension
+        parser: BaseStreamParser
         if in_path.suffix.lower() == ".csv":
             first_table = list(config.tables.keys())[0] if config.tables else "default"
             parser = CSVStreamParser(table_name=first_table)
@@ -331,20 +406,30 @@ def apply(
             TimeElapsedColumn(),
             console=console,
         ) as progress:
-            task = progress.add_task(f"Streaming and masking [bold cyan]{in_path.name}[/bold cyan]...", total=None)
+            task = progress.add_task(
+                f"Streaming and masking [bold cyan]{in_path.name}[/bold cyan]...", total=None
+            )
 
             def _on_progress(rows: int, bytes_processed: int) -> None:
-                progress.update(task, description=f"Processed [bold green]{engine.stats.rows_processed:,}[/bold green] rows ({engine.stats.mb_per_second:.1f} MB/s)...")
+                progress.update(
+                    task,
+                    description=f"Processed [bold green]{engine.stats.rows_processed:,}[/bold green] rows ({engine.stats.mb_per_second:.1f} MB/s)...",
+                )
 
             with in_path.open("r", encoding="utf-8", errors="replace") as in_stream:
                 if dry_run or not out_path:
                     import io
+
                     null_out = io.StringIO()
-                    parser.process_stream(in_stream, null_out, engine, progress_callback=_on_progress)
+                    parser.process_stream(
+                        in_stream, null_out, engine, progress_callback=_on_progress
+                    )
                 else:
                     out_path.parent.mkdir(parents=True, exist_ok=True)
                     with out_path.open("w", encoding="utf-8", newline="") as out_stream:
-                        parser.process_stream(in_stream, out_stream, engine, progress_callback=_on_progress)
+                        parser.process_stream(
+                            in_stream, out_stream, engine, progress_callback=_on_progress
+                        )
 
     duration = max(0.001, time.perf_counter() - start_time)
     stats = engine.finish()
@@ -356,10 +441,14 @@ def apply(
     summary_table.add_row("Rows Processed", f"{stats.rows_processed:,}")
     summary_table.add_row("Cells Masked", f"{stats.cells_masked:,}")
     summary_table.add_row("Execution Time", f"{duration:.2f} seconds")
-    summary_table.add_row("Throughput", f"[bold yellow]{stats.rows_per_second:,.0f} rows/sec[/bold yellow]")
+    summary_table.add_row(
+        "Throughput", f"[bold yellow]{stats.rows_per_second:,.0f} rows/sec[/bold yellow]"
+    )
 
     console.print()
-    console.print(Panel(summary_table, title="[bold green]Masking Summary[/bold green]", border_style="green"))
+    console.print(
+        Panel(summary_table, title="[bold green]Masking Summary[/bold green]", border_style="green")
+    )
 
 
 @app.command()
@@ -383,7 +472,9 @@ def bench(
     rows: int = typer.Option(50000, "--rows", "-n", help="Number of records to benchmark"),
 ) -> None:
     """Run an in-memory performance and throughput benchmark."""
-    console.print(f"[bold cyan]Running performance benchmark with {rows:,} multi-column records...[/bold cyan]")
+    console.print(
+        f"[bold cyan]Running performance benchmark with {rows:,} multi-column records...[/bold cyan]"
+    )
     results = run_benchmark(row_count=rows)
 
     table = Table(title="[bold green]Benchmark Results[/bold green]", box=box.ROUNDED)
@@ -394,8 +485,15 @@ def bench(
     table.add_row("Columns Per Row", f"{results['columns_per_row']}")
     table.add_row("Total Cells Masked", f"{results['cells_masked']:,}")
     table.add_row("Duration", f"{results['duration_seconds']:.3f} s")
-    table.add_row("Throughput (Rows/sec)", f"[bold green]{results['rows_per_sec']:,.0f} rows/sec[/bold green]")
-    table.add_row("Throughput (Cells/sec)", f"[bold green]{results['cells_per_sec']:,.0f} cells/sec[/bold green]")
+    table.add_row(
+        "Throughput (Rows/sec)", f"[bold green]{results['rows_per_sec']:,.0f} rows/sec[/bold green]"
+    )
+    table.add_row(
+        "Throughput (Cells/sec)",
+        f"[bold green]{results['cells_per_sec']:,.0f} cells/sec[/bold green]",
+    )
+    if "peak_memory_mb" in results:
+        table.add_row("Peak Memory", f"{results['peak_memory_mb']:.2f} MB")
 
     console.print(table)
 
@@ -403,7 +501,9 @@ def bench(
 @app.command()
 def version() -> None:
     """Show CloakDB version and system details."""
-    console.print(f"[bold magenta]CloakDB[/bold magenta] version [bold cyan]{__version__}[/bold cyan]")
+    console.print(
+        f"[bold magenta]CloakDB[/bold magenta] version [bold cyan]{__version__}[/bold cyan]"
+    )
     console.print(f"Python {sys.version.split()[0]} on {sys.platform}")
 
 

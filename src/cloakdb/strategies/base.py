@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any
+
 from cloakdb.core.context import TransformationContext
 
 
@@ -32,6 +33,6 @@ class MaskingStrategy(ABC):
         """
         pass
 
-    def validate_params(self, params: Dict[str, Any]) -> None:
+    def validate_params(self, params: dict[str, Any]) -> None:
         """Validates configuration parameters for the strategy."""
         pass

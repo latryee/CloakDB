@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
+import sys
+
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.theme import Theme
-
-import sys
 
 # Reconfigure standard streams to UTF-8 on Windows if possible
 if hasattr(sys.stdout, "reconfigure"):
@@ -21,15 +21,17 @@ if hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
-custom_theme = Theme({
-    "info": "cyan",
-    "warning": "yellow",
-    "danger": "bold red",
-    "success": "bold green",
-    "header": "bold magenta",
-    "key": "bold blue",
-    "value": "bold white",
-})
+custom_theme = Theme(
+    {
+        "info": "cyan",
+        "warning": "yellow",
+        "danger": "bold red",
+        "success": "bold green",
+        "header": "bold magenta",
+        "key": "bold blue",
+        "value": "bold white",
+    }
+)
 
 console = Console(theme=custom_theme, safe_box=True)
 err_console = Console(theme=custom_theme, stderr=True, safe_box=True)

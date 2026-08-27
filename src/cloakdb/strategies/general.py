@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import random
 import string
-from typing import Any, List, Optional
+from typing import Any
+
 from cloakdb.core.context import TransformationContext
 from cloakdb.strategies.base import MaskingStrategy
 from cloakdb.strategies.registry import register_strategy
@@ -55,7 +56,7 @@ class ChoiceStrategy(MaskingStrategy):
         value: Any,
         context: TransformationContext,
         *,
-        choices: Optional[List[Any]] = None,
+        choices: list[Any] | None = None,
         deterministic: bool = True,
         **kwargs: Any,
     ) -> Any:

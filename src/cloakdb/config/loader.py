@@ -5,12 +5,12 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any
+
 import yaml
 from pydantic import ValidationError
 
 from cloakdb.config.models import CloakConfig
-
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z0-9_]+)(?::([^}]*))?\}")
 
@@ -18,6 +18,7 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z0-9_]+)(?::([^}]*))?\}")
 def _interpolate_env_vars(data: Any) -> Any:
     """Recursively interpolates environment variables in the format ${VAR} or ${VAR:default}."""
     if isinstance(data, str):
+
         def _replace(match: re.Match[str]) -> str:
             var_name = match.group(1)
             default_val = match.group(2) if match.group(2) is not None else ""
@@ -31,7 +32,7 @@ def _interpolate_env_vars(data: Any) -> Any:
     return data
 
 
-def load_config(config_path: Union[str, Path]) -> CloakConfig:
+def load_config(config_path: str | Path) -> CloakConfig:
     """Loads and validates a CloakDB YAML or JSON configuration file."""
     path = Path(config_path)
     if not path.exists():
@@ -63,7 +64,7 @@ def dump_config_to_yaml(config: CloakConfig) -> str:
     return yaml.dump(raw_dict, sort_keys=False, default_flow_style=False, allow_unicode=True)
 
 
-def save_config(config: CloakConfig, output_path: Union[str, Path]) -> None:
+def save_config(config: CloakConfig, output_path: str | Path) -> None:
     """Saves a CloakConfig instance to a YAML file."""
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)

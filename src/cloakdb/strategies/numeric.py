@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import random
-from typing import Any, Optional, Union
+from typing import Any
+
 from cloakdb.core.context import TransformationContext
 from cloakdb.strategies.base import MaskingStrategy
 from cloakdb.strategies.registry import register_strategy
@@ -13,7 +14,9 @@ from cloakdb.strategies.registry import register_strategy
 class NumericJitterStrategy(MaskingStrategy):
     """Adds statistical noise (Gaussian or Uniform percentage) to numeric columns."""
 
-    description = "Adds percentage noise to numeric values while preserving statistical distribution"
+    description = (
+        "Adds percentage noise to numeric values while preserving statistical distribution"
+    )
 
     def transform(
         self,
@@ -22,9 +25,9 @@ class NumericJitterStrategy(MaskingStrategy):
         *,
         percentage: float = 10.0,
         distribution: str = "uniform",
-        decimals: Optional[int] = None,
-        min_val: Optional[float] = None,
-        max_val: Optional[float] = None,
+        decimals: int | None = None,
+        min_val: float | None = None,
+        max_val: float | None = None,
         deterministic: bool = True,
         **kwargs: Any,
     ) -> Any:
@@ -76,8 +79,8 @@ class RangeRandomStrategy(MaskingStrategy):
         value: Any,
         context: TransformationContext,
         *,
-        min_val: Union[int, float] = 0,
-        max_val: Union[int, float] = 100,
+        min_val: int | float = 0,
+        max_val: int | float = 100,
         as_integer: bool = True,
         deterministic: bool = True,
         **kwargs: Any,
@@ -105,7 +108,7 @@ class RoundToStrategy(MaskingStrategy):
         value: Any,
         context: TransformationContext,
         *,
-        step: Union[int, float] = 10,
+        step: int | float = 10,
         **kwargs: Any,
     ) -> Any:
         if value is None:

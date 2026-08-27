@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cloakdb"
 version = "0.1.0"
-description = "High-performance, deterministic database & SQL dump anonymization CLI tool"
+description = "High-performance, deterministic database & SQL dump anonymization CLI"
 readme = "README.md"
 authors = [
     { name = "latryee", email = "sariyarberkay@gmail.com" }
 ]
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -21,7 +21,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -58,7 +57,15 @@ dev = [
     "pytest-cov>=4.1.0",
     "mypy>=1.6.0",
     "ruff>=0.1.0",
+    "types-PyYAML>=6.0.0",
+    "build>=1.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/latryee/CloakDB"
+Repository = "https://github.com/latryee/CloakDB"
+Issues = "https://github.com/latryee/CloakDB/issues"
+Changelog = "https://github.com/latryee/CloakDB/blob/main/CHANGELOG.md"
 
 [project.scripts]
 cloakdb = "cloakdb.cli:app"
@@ -70,3 +77,60 @@ where = ["src"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["cloakdb"]
+branch = true
+omit = [
+    "src/cloakdb/__main__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults (Typer pattern)
+    "B027",   # empty method in abstract base class without abstract decorator
+    "B905",   # zip() without an explicit strict= parameter
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+plugins = ["pydantic.mypy"]
+exclude = ["tests/"]
+
+[[tool.mypy.overrides]]
+module = "faker.*"
+ignore_missing_imports = true

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import random
-from typing import Any, Dict, Optional
+from typing import Any
+
 from faker import Faker
+
 from cloakdb.core.context import TransformationContext
 from cloakdb.strategies.base import MaskingStrategy
 from cloakdb.strategies.registry import register_strategy
@@ -13,7 +15,7 @@ from cloakdb.strategies.registry import register_strategy
 class _FakerPool:
     """Thread-safe pool of cached Faker instances indexed by locale."""
 
-    _instances: Dict[str, Faker] = {}
+    _instances: dict[str, Faker] = {}
 
     @classmethod
     def get(cls, locale: str = "en_US") -> Faker:
@@ -34,7 +36,7 @@ class SyntheticFakerStrategy(MaskingStrategy):
         context: TransformationContext,
         *,
         provider: str = "name",
-        locale: Optional[str] = None,
+        locale: str | None = None,
         deterministic: bool = True,
         preserve_domain: bool = False,
         **kwargs: Any,

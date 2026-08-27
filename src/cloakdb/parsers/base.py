@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable, IO, Optional
+from collections.abc import Callable
+from typing import IO
+
 from cloakdb.core.engine import CloakEngine
 
 
@@ -16,7 +18,7 @@ class BaseStreamParser(ABC):
         input_stream: IO[str],
         output_stream: IO[str],
         engine: CloakEngine,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> None:
         """Streams records from input_stream, applies masking via engine, and writes to output_stream.
 

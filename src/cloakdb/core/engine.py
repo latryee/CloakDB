@@ -2,12 +2,89 @@
 
 from __future__ import annotations
 
+import ast
+import operator
 import time
-from typing import Any, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
+
 from cloakdb.config.models import CloakConfig, ColumnRule, TableRule
 from cloakdb.core.context import MaskingStats, TransformationContext
 from cloakdb.core.integrity import ReferentialIntegrityManager
 from cloakdb.strategies.registry import StrategyRegistry
+
+_SAFE_OPERATORS: dict[type, Callable[..., Any]] = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+    ast.In: lambda a, b: a in b,
+    ast.NotIn: lambda a, b: a not in b,
+    ast.Is: operator.is_,
+    ast.IsNot: operator.is_not,
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+    ast.Not: operator.not_,
+}
+
+
+def _eval_ast_node(node: ast.AST, context: dict[str, Any]) -> Any:
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        key = node.id.lower()
+        for k, v in context.items():
+            if str(k).lower().strip().strip('"').strip("`").strip("[]") == key:
+                return v
+        return None
+    if isinstance(node, ast.UnaryOp):
+        op_fn = _SAFE_OPERATORS.get(type(node.op))
+        if op_fn is None:
+            raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+        return op_fn(_eval_ast_node(node.operand, context))
+    if isinstance(node, ast.BinOp):
+        op_fn = _SAFE_OPERATORS.get(type(node.op))
+        if op_fn is None:
+            raise ValueError(f"Unsupported binary operator: {type(node.op).__name__}")
+        return op_fn(_eval_ast_node(node.left, context), _eval_ast_node(node.right, context))
+    if isinstance(node, ast.BoolOp):
+        if isinstance(node.op, ast.And):
+            return all(_eval_ast_node(val, context) for val in node.values)
+        if isinstance(node.op, ast.Or):
+            return any(_eval_ast_node(val, context) for val in node.values)
+        raise ValueError(f"Unsupported boolean operator: {type(node.op).__name__}")
+    if isinstance(node, ast.Compare):
+        left = _eval_ast_node(node.left, context)
+        for op, comparator in zip(node.ops, node.comparators):
+            op_fn = _SAFE_OPERATORS.get(type(op))
+            if op_fn is None:
+                raise ValueError(f"Unsupported comparison operator: {type(op).__name__}")
+            right = _eval_ast_node(comparator, context)
+            if not op_fn(left, right):
+                return False
+            left = right
+        return True
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return [_eval_ast_node(el, context) for el in node.elts]
+    raise ValueError(f"Unsupported expression node: {type(node).__name__}")
+
+
+def evaluate_condition(condition_str: str, row_data: dict[str, Any]) -> bool:
+    """Safely evaluates a boolean condition on row data using AST traversal."""
+    if not condition_str or not condition_str.strip():
+        return True
+    try:
+        parsed = ast.parse(condition_str.strip(), mode="eval")
+        result = _eval_ast_node(parsed.body, row_data)
+        return bool(result)
+    except Exception:
+        return False
 
 
 class CloakEngine:
@@ -23,14 +100,14 @@ class CloakEngine:
         )
 
         # Normalize table names for case-insensitive / quoted lookup
-        self._table_rules: Dict[str, TableRule] = {}
+        self._table_rules: dict[str, TableRule] = {}
         for tbl_name, rule in config.tables.items():
             self._table_rules[self._normalize_name(tbl_name)] = rule
 
     def _normalize_name(self, name: str) -> str:
-        return name.strip().strip('"').strip('`').strip('[]').lower()
+        return name.strip().strip('"').strip("`").strip("[]").lower()
 
-    def get_table_rule(self, table_name: str) -> Optional[TableRule]:
+    def get_table_rule(self, table_name: str) -> TableRule | None:
         """Looks up rules for a table name (case-insensitive & quote-agnostic)."""
         return self._table_rules.get(self._normalize_name(table_name))
 
@@ -41,10 +118,10 @@ class CloakEngine:
     def mask_row_values(
         self,
         table_name: str,
-        column_names: List[str],
-        row_values: List[Any],
+        column_names: list[str],
+        row_values: list[Any],
         row_index: int = 0,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """Masks an ordered list of values corresponding to column names in a table."""
         tbl_rule = self.get_table_rule(table_name)
         if not tbl_rule or not tbl_rule.columns:
@@ -52,7 +129,7 @@ class CloakEngine:
 
         # Build column index to rule map
         normalized_cols = [self._normalize_name(c) for c in column_names]
-        rule_map: Dict[int, ColumnRule] = {}
+        rule_map: dict[int, ColumnRule] = {}
         for col_name, col_rule in tbl_rule.columns.items():
             norm = self._normalize_name(col_name)
             if norm in normalized_cols:
@@ -86,9 +163,9 @@ class CloakEngine:
     def mask_record(
         self,
         table_name: str,
-        record: Dict[str, Any],
+        record: dict[str, Any],
         row_index: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Masks a dictionary record representing a database row."""
         tbl_rule = self.get_table_rule(table_name)
         if not tbl_rule or not tbl_rule.columns:
@@ -122,7 +199,7 @@ class CloakEngine:
         value: Any,
         rule: ColumnRule,
         row_index: int,
-        row_data: Dict[str, Any],
+        row_data: dict[str, Any],
     ) -> Any:
         """Applies a single column rule to a value, respecting conditions and referential integrity."""
         # Handle NULL values
@@ -130,14 +207,8 @@ class CloakEngine:
             return None
 
         # Check optional condition
-        if rule.condition:
-            try:
-                # Safe evaluation with row_data
-                cond_passed = bool(eval(rule.condition, {"__builtins__": {}}, dict(row_data)))
-                if not cond_passed:
-                    return value
-            except Exception:
-                pass
+        if rule.condition and not evaluate_condition(rule.condition, dict(row_data)):
+            return value
 
         # Check referential integrity / consistency group
         group = self.integrity_manager.get_group_for_column(table_name, column_name)

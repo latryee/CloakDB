@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -16,8 +16,8 @@ class PIIDetectionResult:
     pii_type: str
     confidence: float
     recommended_strategy: str
-    recommended_params: Dict[str, Any]
-    sample_matches: List[str]
+    recommended_params: dict[str, Any]
+    sample_matches: list[str]
 
 
 def _shannon_entropy(s: str) -> float:
@@ -83,42 +83,127 @@ class PIIDetector:
     # Regex patterns
     PATTERNS = {
         "email": re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"),
-        "phone": re.compile(r"^\+?[0-9]{1,4}?[-.\s]?\(?[0-9]{1,3}?\)?[-.\s]?[0-9]{3,4}[-.\s]?[0-9]{3,4}$"),
-        "credit_card": re.compile(r"^(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})$"),
+        "phone": re.compile(
+            r"^\+?[0-9]{1,4}?[-.\s]?\(?[0-9]{1,3}?\)?[-.\s]?[0-9]{3,4}[-.\s]?[0-9]{3,4}$"
+        ),
+        "credit_card": re.compile(
+            r"^(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})$"
+        ),
         "ssn": re.compile(r"^(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}$"),
-        "ipv4": re.compile(r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"),
+        "ipv4": re.compile(
+            r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+        ),
         "uuid": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I),
     }
 
     # Semantic column name heuristics (ordered with specific before generic)
     NAME_KEYWORDS = {
         "ip_address": ["ip_address", "ip", "ipv4", "client_ip", "remote_addr", "ip_adresi"],
-        "credit_card": ["credit_card", "card_number", "card_no", "cc_num", "kart_no", "kredi_karti", "kredi_kart_no"],
-        "date_of_birth": ["dob", "birth_date", "birthdate", "birthday", "dogum_tarihi", "dogum_gunu", "d_tarihi"],
-        "tckn": ["tckn", "tc_kimlik", "tc_no", "kimlik_no", "tc_kimlik_no", "citizenship_id", "tcno", "vergi_no"],
+        "credit_card": [
+            "credit_card",
+            "card_number",
+            "card_no",
+            "cc_num",
+            "kart_no",
+            "kredi_karti",
+            "kredi_kart_no",
+        ],
+        "date_of_birth": [
+            "dob",
+            "birth_date",
+            "birthdate",
+            "birthday",
+            "dogum_tarihi",
+            "dogum_gunu",
+            "d_tarihi",
+        ],
+        "tckn": [
+            "tckn",
+            "tc_kimlik",
+            "tc_no",
+            "kimlik_no",
+            "tc_kimlik_no",
+            "citizenship_id",
+            "tcno",
+            "vergi_no",
+        ],
         "iban": ["iban", "bank_account", "account_number", "hesap_no", "iban_no", "banka_hesap_no"],
         "email": ["email", "e_mail", "mail", "eposta", "e_posta", "e-posta", "email_adresi"],
         "first_name": ["first_name", "firstname", "fname", "ad", "isim", "musteri_adi"],
         "last_name": ["last_name", "lastname", "lname", "surname", "soyad", "soyisim"],
-        "full_name": ["full_name", "fullname", "ad_soyad", "isim_soyad", "adsoyad", "kullanici_adi"],
-        "phone": ["phone_number", "phone", "mobile", "cell", "tel", "telefon", "gsm", "cep_tel", "cep_telefonu", "iletisim_no"],
+        "full_name": [
+            "full_name",
+            "fullname",
+            "ad_soyad",
+            "isim_soyad",
+            "adsoyad",
+            "kullanici_adi",
+        ],
+        "phone": [
+            "phone_number",
+            "phone",
+            "mobile",
+            "cell",
+            "tel",
+            "telefon",
+            "gsm",
+            "cep_tel",
+            "cep_telefonu",
+            "iletisim_no",
+        ],
         "ssn": ["ssn", "social_security"],
-        "address": ["shipping_address", "billing_address", "full_address", "street_address", "address", "street", "adres", "sokak", "cadde", "mahalle", "teslimat_adresi", "fatura_adresi"],
+        "address": [
+            "shipping_address",
+            "billing_address",
+            "full_address",
+            "street_address",
+            "address",
+            "street",
+            "adres",
+            "sokak",
+            "cadde",
+            "mahalle",
+            "teslimat_adresi",
+            "fatura_adresi",
+        ],
         "city": ["city", "sehir", "il", "ilce"],
         "country": ["country", "ulke"],
         "postcode": ["postcode", "zip", "zip_code", "posta_kodu"],
-        "salary": ["salary", "wage", "compensation", "maas", "gelir", "balance", "bakiye", "tutar", "ucret"],
-        "password": ["password", "passwd", "pwd", "hash", "secret", "token", "sifre", "parola", "api_key", "gizli_anahtar"],
+        "salary": [
+            "salary",
+            "wage",
+            "compensation",
+            "maas",
+            "gelir",
+            "balance",
+            "bakiye",
+            "tutar",
+            "ucret",
+        ],
+        "password": [
+            "password",
+            "passwd",
+            "pwd",
+            "hash",
+            "secret",
+            "token",
+            "sifre",
+            "parola",
+            "api_key",
+            "gizli_anahtar",
+        ],
     }
 
     def detect_column(
         self,
         column_name: str,
-        sample_values: List[Any],
-    ) -> Optional[PIIDetectionResult]:
+        sample_values: list[Any],
+    ) -> PIIDetectionResult | None:
         """Runs multi-layered heuristics against a column name and its sample values."""
-        non_null_samples = [str(v).strip() for v in sample_values if v is not None and str(v).strip() != ""]
-        norm_col = column_name.lower().strip().strip('"').strip('`').strip('[]')
+        non_null_samples = [
+            str(v).strip() for v in sample_values if v is not None and str(v).strip() != ""
+        ]
+        norm_col = column_name.lower().strip().strip('"').strip("`").strip("[]")
 
         # 1. Match semantic column keywords
         for pii_type, keywords in self.NAME_KEYWORDS.items():
@@ -145,18 +230,6 @@ class PIIDetector:
                 column_name=column_name,
                 pii_type="email",
                 confidence=0.95,
-                recommended_strategy=strategy,
-                recommended_params=params,
-                sample_matches=non_null_samples[:3],
-            )
-
-        phone_matches = sum(1 for v in non_null_samples if self.PATTERNS["phone"].match(v))
-        if phone_matches / len(non_null_samples) >= 0.5:
-            strategy, params = self._get_recommendation("phone")
-            return PIIDetectionResult(
-                column_name=column_name,
-                pii_type="phone",
-                confidence=0.85,
                 recommended_strategy=strategy,
                 recommended_params=params,
                 sample_matches=non_null_samples[:3],
@@ -201,6 +274,18 @@ class PIIDetector:
                 sample_matches=non_null_samples[:3],
             )
 
+        phone_matches = sum(1 for v in non_null_samples if self.PATTERNS["phone"].match(v))
+        if phone_matches / len(non_null_samples) >= 0.5:
+            strategy, params = self._get_recommendation("phone")
+            return PIIDetectionResult(
+                column_name=column_name,
+                pii_type="phone",
+                confidence=0.85,
+                recommended_strategy=strategy,
+                recommended_params=params,
+                sample_matches=non_null_samples[:3],
+            )
+
         # Check for high-entropy secrets / hashes
         avg_entropy = sum(_shannon_entropy(v) for v in non_null_samples) / len(non_null_samples)
         if avg_entropy > 4.5 and len(non_null_samples[0]) >= 20:
@@ -216,9 +301,9 @@ class PIIDetector:
 
         return None
 
-    def _get_recommendation(self, pii_type: str) -> Tuple[str, Dict[str, Any]]:
+    def _get_recommendation(self, pii_type: str) -> tuple[str, dict[str, Any]]:
         """Maps detected PII type to recommended masking strategy and params."""
-        mapping = {
+        mapping: dict[str, tuple[str, dict[str, Any]]] = {
             "email": ("faker", {"provider": "email", "preserve_domain": True}),
             "first_name": ("faker", {"provider": "first_name"}),
             "last_name": ("faker", {"provider": "last_name"}),

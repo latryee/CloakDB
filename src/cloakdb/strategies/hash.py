@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from typing import Any
+
 from cloakdb.core.context import TransformationContext
 from cloakdb.strategies.base import MaskingStrategy
 from cloakdb.strategies.registry import register_strategy
@@ -14,7 +15,9 @@ from cloakdb.strategies.registry import register_strategy
 class DeterministicHashStrategy(MaskingStrategy):
     """Generates a deterministic keyed HMAC-SHA256 hash or mapped integer from input value."""
 
-    description = "Deterministic keyed HMAC hash or pseudo-integer (preserves foreign keys across tables)"
+    description = (
+        "Deterministic keyed HMAC hash or pseudo-integer (preserves foreign keys across tables)"
+    )
 
     def transform(
         self,
@@ -48,6 +51,7 @@ class DeterministicHashStrategy(MaskingStrategy):
             digest_str = h.hex()[:length]
         elif output_format == "base64":
             import base64
+
             digest_str = base64.b64encode(h).decode("ascii")[:length]
         else:
             digest_str = h.hex()[:length]
@@ -73,6 +77,7 @@ class DeterministicUUIDStrategy(MaskingStrategy):
             return None
 
         import uuid
+
         effective_salt = salt or context.salt or "cloakdb-salt"
         val_str = f"{effective_salt}:{value}"
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, val_str))

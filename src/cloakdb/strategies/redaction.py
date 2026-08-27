@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+
 from cloakdb.core.context import TransformationContext
 from cloakdb.strategies.base import MaskingStrategy
 from cloakdb.strategies.registry import register_strategy
@@ -105,7 +106,7 @@ class CreditCardMaskStrategy(MaskingStrategy):
             return mask_char * len(str(value))
 
         last_four = digits[-4:]
-        return f"{mask_char*4}-{mask_char*4}-{mask_char*4}-{last_four}"
+        return f"{mask_char * 4}-{mask_char * 4}-{mask_char * 4}-{last_four}"
 
 
 @register_strategy("regex_replace", aliases=["regex"])
