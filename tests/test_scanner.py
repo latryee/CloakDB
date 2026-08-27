@@ -36,3 +36,20 @@ def test_scanner_sql_dump(postgres_dump_file: Path):
     assert "email" in detected_col_names
     assert "full_name" in detected_col_names
     assert "phone" in detected_col_names
+
+
+def test_turkish_column_detection():
+    detector = PIIDetector()
+    res_tckn = detector.detect_column("tc_kimlik_no", ["10000000146"])
+    assert res_tckn is not None
+    assert res_tckn.pii_type == "tckn"
+    assert res_tckn.recommended_strategy == "tckn"
+
+    res_eposta = detector.detect_column("eposta_adresi", ["ahmet@sirket.com.tr"])
+    assert res_eposta is not None
+    assert res_eposta.pii_type == "email"
+
+    res_maas = detector.detect_column("aylik_maas", [45000.0])
+    assert res_maas is not None
+    assert res_maas.pii_type == "salary"
+

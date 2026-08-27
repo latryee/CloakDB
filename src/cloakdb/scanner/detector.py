@@ -92,23 +92,23 @@ class PIIDetector:
 
     # Semantic column name heuristics (ordered with specific before generic)
     NAME_KEYWORDS = {
-        "ip_address": ["ip_address", "ip", "ipv4", "client_ip", "remote_addr"],
-        "credit_card": ["credit_card", "card_number", "card_no", "cc_num", "kart_no", "kredi_karti"],
-        "date_of_birth": ["dob", "birth_date", "birthdate", "birthday", "dogum_tarihi"],
-        "tckn": ["tckn", "tc_kimlik", "tc_no", "kimlik_no", "citizenship_id"],
-        "iban": ["iban", "bank_account", "account_number", "hesap_no"],
-        "email": ["email", "e_mail", "mail", "eposta", "e_posta"],
-        "first_name": ["first_name", "firstname", "fname"],
-        "last_name": ["last_name", "lastname", "lname", "surname", "soyad"],
-        "full_name": ["full_name", "fullname", "ad_soyad", "isim_soyad"],
-        "phone": ["phone_number", "phone", "mobile", "cell", "tel", "telefon", "gsm"],
+        "ip_address": ["ip_address", "ip", "ipv4", "client_ip", "remote_addr", "ip_adresi"],
+        "credit_card": ["credit_card", "card_number", "card_no", "cc_num", "kart_no", "kredi_karti", "kredi_kart_no"],
+        "date_of_birth": ["dob", "birth_date", "birthdate", "birthday", "dogum_tarihi", "dogum_gunu", "d_tarihi"],
+        "tckn": ["tckn", "tc_kimlik", "tc_no", "kimlik_no", "tc_kimlik_no", "citizenship_id", "tcno", "vergi_no"],
+        "iban": ["iban", "bank_account", "account_number", "hesap_no", "iban_no", "banka_hesap_no"],
+        "email": ["email", "e_mail", "mail", "eposta", "e_posta", "e-posta", "email_adresi"],
+        "first_name": ["first_name", "firstname", "fname", "ad", "isim", "musteri_adi"],
+        "last_name": ["last_name", "lastname", "lname", "surname", "soyad", "soyisim"],
+        "full_name": ["full_name", "fullname", "ad_soyad", "isim_soyad", "adsoyad", "kullanici_adi"],
+        "phone": ["phone_number", "phone", "mobile", "cell", "tel", "telefon", "gsm", "cep_tel", "cep_telefonu", "iletisim_no"],
         "ssn": ["ssn", "social_security"],
-        "address": ["shipping_address", "billing_address", "full_address", "street_address", "address", "street", "adres", "sokak", "cadde"],
-        "city": ["city", "sehir", "il"],
+        "address": ["shipping_address", "billing_address", "full_address", "street_address", "address", "street", "adres", "sokak", "cadde", "mahalle", "teslimat_adresi", "fatura_adresi"],
+        "city": ["city", "sehir", "il", "ilce"],
         "country": ["country", "ulke"],
         "postcode": ["postcode", "zip", "zip_code", "posta_kodu"],
-        "salary": ["salary", "wage", "compensation", "maas", "gelir", "balance", "bakiye"],
-        "password": ["password", "passwd", "pwd", "hash", "secret", "token", "sifre", "api_key"],
+        "salary": ["salary", "wage", "compensation", "maas", "gelir", "balance", "bakiye", "tutar", "ucret"],
+        "password": ["password", "passwd", "pwd", "hash", "secret", "token", "sifre", "parola", "api_key", "gizli_anahtar"],
     }
 
     def detect_column(
