@@ -33,7 +33,7 @@ Creating realistic staging and testing databases from production dumps is notori
 - **Manual Configuration Nightmare:** Inspecting hundreds of schema columns manually to write masking rules takes days.
 
 **CloakDB** was built from the ground up to solve these problems with modern software engineering rigor:
-1. **Deterministic Referential Integrity:** Primary and foreign keys are pseudonymized using keyed HMAC hashing or bounded LRU state caching—relations stay 100% valid.
+1. **Deterministic Referential Integrity:** Primary and foreign keys are pseudonymized using keyed HMAC hashing (globally consistent across tables) or `ConsistencyGroup` definitions for synthetic data (where determinism is mathematically reproducible independent of LRU cache retention).
 2. **Zero-RAM Streaming Pipeline:** Streams and transforms PostgreSQL `COPY` / `INSERT`, MySQL, SQLite, CSV, and JSONL dumps in constant memory (~40MB RAM).
 3. **Smart PII Auto-Scanner (`cloakdb scan`):** Automatically detects PII (Emails, Phones, Credit Cards with Luhn verification, Turkish TCKN, SSN, IBAN, IP Addresses, High-entropy secrets) and writes production-ready configuration in seconds.
 
@@ -236,9 +236,10 @@ global:
   salt: "${SECRET_SALT:cloakdb-salt}"     # Secret salt for keyed HMAC hashing
   locale: "en_US"                         # Faker locale (en_US, tr_TR, de_DE, etc.)
   batch_size: 5000                        # Chunk size for streaming batch operations
-  cache_pseudonyms: true                  # Cache pseudonyms to preserve cross-table consistency
+  cache_pseudonyms: true                  # Cache pseudonyms for O(1) performance (correctness is mathematically guaranteed even on cache eviction)
 
-# Referential Integrity Groups: Guarantees matching foreign key pseudonyms
+# Referential Integrity Groups: Guarantees matching pseudonyms across different tables/columns
+# (Synthetic strategies derive a shared group seed; LRU cache speeds up lookup without being a correctness dependency)
 consistency_groups:
   - name: "user_ids"
     strategy: "deterministic_hash"
@@ -250,6 +251,15 @@ consistency_groups:
       - "users.id"
       - "orders.user_id"
       - "audit_logs.user_id"
+
+  - name: "user_emails"
+    strategy: "faker"
+    params:
+      provider: "email"
+      preserve_domain: true
+    columns:
+      - "users.email"
+      - "audit_logs.actor_email"
 
 # Table Transformation Rules
 tables:

@@ -72,3 +72,176 @@ def test_engine_conditional_masking():
 
     assert res_us["salary"] == 0
     assert res_uk["salary"] == 95000
+
+
+def test_deterministic_hash_across_tables_without_consistency_group():
+    """Test A: deterministic_hash produces the same pseudonym across tables without a ConsistencyGroup."""
+    config = CloakConfig(
+        version="1",
+        tables={
+            "users": TableRule(
+                columns={
+                    "email": ColumnRule(strategy="deterministic_hash", params={"output_format": "hex", "length": 16}),
+                }
+            ),
+            "audit_logs": TableRule(
+                columns={
+                    "email": ColumnRule(strategy="deterministic_hash", params={"output_format": "hex", "length": 16}),
+                }
+            ),
+        },
+    )
+
+    engine = CloakEngine(config)
+    user_rec = {"email": "alice@example.com"}
+    audit_rec = {"email": "alice@example.com"}
+
+    masked_user = engine.mask_record("users", user_rec)
+    masked_audit = engine.mask_record("audit_logs", audit_rec)
+
+    assert masked_user["email"] == masked_audit["email"], "deterministic_hash must match across tables for identical raw values"
+
+
+def test_deterministic_hash_different_column_names():
+    """Test B: deterministic_hash produces the same pseudonym across different column names."""
+    config = CloakConfig(
+        version="1",
+        tables={
+            "users": TableRule(
+                columns={
+                    "email": ColumnRule(strategy="deterministic_hash", params={"output_format": "hex", "length": 16}),
+                }
+            ),
+            "audit_logs": TableRule(
+                columns={
+                    "actor_email": ColumnRule(strategy="deterministic_hash", params={"output_format": "hex", "length": 16}),
+                }
+            ),
+        },
+    )
+
+    engine = CloakEngine(config)
+    user_rec = {"email": "alice@example.com"}
+    audit_rec = {"actor_email": "alice@example.com"}
+
+    masked_user = engine.mask_record("users", user_rec)
+    masked_audit = engine.mask_record("audit_logs", audit_rec)
+
+    assert masked_user["email"] == masked_audit["actor_email"], "deterministic_hash must match even under different column names"
+
+
+def test_faker_without_consistency_group_is_column_scoped():
+    """Test C: Faker without a consistency group is table/column-scoped and does not accidentally match globally."""
+    config = CloakConfig(
+        version="1",
+        tables={
+            "users": TableRule(
+                columns={
+                    "email": ColumnRule(strategy="faker", params={"provider": "email", "deterministic": True}),
+                }
+            ),
+            "audit_logs": TableRule(
+                columns={
+                    "email": ColumnRule(strategy="faker", params={"provider": "email", "deterministic": True}),
+                }
+            ),
+        },
+    )
+
+    engine = CloakEngine(config)
+    user_rec = {"email": "alice@example.com"}
+    audit_rec = {"email": "alice@example.com"}
+
+    masked_user = engine.mask_record("users", user_rec)
+    masked_audit = engine.mask_record("audit_logs", audit_rec)
+
+    # In un-grouped mode, Faker seeds include table_name, ensuring column/table isolation
+    assert masked_user["email"] != masked_audit["email"], "Un-grouped Faker should be table-scoped by default"
+
+
+def test_faker_with_consistency_group_matches_across_tables_and_columns():
+    """Test D: Faker with a consistency group produces the exact same pseudonym across tables and column names."""
+    config = CloakConfig(
+        version="1",
+        consistency_groups=[
+            ConsistencyGroup(
+                name="user_email_group",
+                columns=["users.email", "audit_logs.actor_email"],
+                strategy="faker",
+                params={"provider": "email", "deterministic": True},
+            )
+        ],
+        tables={
+            "users": TableRule(
+                columns={
+                    "email": ColumnRule(strategy="faker", consistency_group="user_email_group"),
+                }
+            ),
+            "audit_logs": TableRule(
+                columns={
+                    "actor_email": ColumnRule(strategy="faker", consistency_group="user_email_group"),
+                }
+            ),
+        },
+    )
+
+    engine = CloakEngine(config)
+    user_rec = {"email": "alice@example.com"}
+    audit_rec = {"actor_email": "alice@example.com"}
+
+    masked_user = engine.mask_record("users", user_rec)
+    masked_audit = engine.mask_record("audit_logs", audit_rec)
+
+    assert masked_user["email"] == masked_audit["actor_email"], "ConsistencyGroup Faker must produce identical pseudonyms"
+
+
+def test_consistency_group_after_cache_eviction():
+    """Test E: Correctness does not depend on LRU cache retention; recomputing after eviction produces identical pseudonym."""
+    config = CloakConfig(
+        version="1",
+        global_settings={
+            "max_cache_size": 2,  # Very small cache to force eviction
+            "cache_pseudonyms": True,
+        },
+        consistency_groups=[
+            ConsistencyGroup(
+                name="user_email_group",
+                columns=["users.email", "audit_logs.actor_email"],
+                strategy="faker",
+                params={"provider": "email", "deterministic": True},
+            )
+        ],
+        tables={
+            "users": TableRule(
+                columns={
+                    "email": ColumnRule(strategy="faker", consistency_group="user_email_group"),
+                }
+            ),
+            "audit_logs": TableRule(
+                columns={
+                    "actor_email": ColumnRule(strategy="faker", consistency_group="user_email_group"),
+                }
+            ),
+        },
+    )
+
+    engine = CloakEngine(config)
+
+    # 1. Mask original value on users table
+    first_masked = engine.mask_record("users", {"email": "alice@example.com"})["email"]
+
+    # 2. Flood cache with unique values to guarantee eviction of "alice@example.com"
+    for i in range(10):
+        engine.mask_record("users", {"email": f"dummy_user_{i}@example.com"})
+
+    # Verify that "alice@example.com" was indeed evicted from cache
+    cache = engine.integrity_manager._group_caches.get("user_email_group")
+    assert cache is not None
+    assert not cache.contains("alice@example.com"), "Original value must have been evicted from LRU cache"
+
+    # 3. Mask original value on a DIFFERENT table and DIFFERENT column name (audit_logs.actor_email)
+    second_masked = engine.mask_record("audit_logs", {"actor_email": "alice@example.com"})["actor_email"]
+
+    # 4. Assert that the re-computed value is mathematically identical
+    assert first_masked == second_masked, "Recomputed synthetic pseudonym after cache eviction must match first occurrence"
+

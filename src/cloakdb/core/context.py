@@ -43,16 +43,38 @@ class TransformationContext:
     seed: Optional[int] = 42
     salt: str = "cloakdb-salt"
     locale: str = "en_US"
+    group_name: Optional[str] = None
     stats: MaskingStats = field(default_factory=MaskingStats)
     custom_state: Dict[str, Any] = field(default_factory=dict)
 
-    def derive_seed(self, value: Any = None) -> int:
-        """Derives a deterministic 64-bit integer seed combining table, column, salt, and value."""
+    def derive_seed(self, value: Any = None, scope: Optional[str] = None) -> int:
+        """Derives a deterministic 64-bit integer seed.
+
+        Scopes:
+            - 'global': based on salt + value
+            - 'group': based on salt + group_name + value (used for ConsistencyGroups)
+            - 'column': based on salt + table_name + column_name + value (default for un-grouped fields)
+
+        If scope is not explicitly provided, it defaults to 'group' when group_name is set,
+        and 'column' otherwise.
+        """
         import hashlib
+
+        effective_scope = (scope.lower().strip() if scope else ("group" if self.group_name else "column"))
+
         h = hashlib.sha256()
         h.update(self.salt.encode("utf-8"))
-        h.update(self.table_name.encode("utf-8"))
-        h.update(self.column_name.encode("utf-8"))
+
+        if effective_scope == "global":
+            pass
+        elif effective_scope == "group":
+            grp = self.group_name or "default_group"
+            h.update(f"group:{grp}".encode("utf-8"))
+        else:  # "column"
+            h.update(self.table_name.encode("utf-8"))
+            h.update(self.column_name.encode("utf-8"))
+
         if value is not None:
             h.update(str(value).encode("utf-8"))
+
         return int.from_bytes(h.digest()[:8], "big")

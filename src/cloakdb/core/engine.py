@@ -164,6 +164,7 @@ class CloakEngine:
             seed=self.config.global_settings.seed,
             salt=self.config.global_settings.salt,
             locale=self.config.global_settings.locale,
+            group_name=group_name,
             stats=self.stats,
         )
 
