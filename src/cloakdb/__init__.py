@@ -1,8 +1,8 @@
 """CloakDB - High-performance, deterministic database & SQL dump anonymization CLI."""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __author__ = "CloakDB Contributors"
-__license__ = "MIT"
+__license__ = "Apache-2.0"
 
 from cloakdb.config.models import CloakConfig, ColumnRule, GlobalConfig, TableRule
 from cloakdb.core.engine import CloakEngine

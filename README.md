@@ -2,7 +2,7 @@
 
 # 🛡️ CloakDB
 
-**High-performance, dialect-agnostic database anonymization and differential privacy engine with Format-Preserving Encryption, $\mathcal{O}(1)$ memory streaming, OpenTelemetry observability, and SOC2 tamper-evident audit trails.**
+**High-throughput, dialect-agnostic database anonymization and differential privacy engine with Format-Preserving Encryption (FPE) and $\mathcal{O}(1)$ memory streaming.**
 
 [![CI Pipeline](https://img.shields.io/github/actions/workflow/status/latryee/CloakDB/ci.yml?branch=main&style=flat-square&logo=github)](https://github.com/latryee/CloakDB/actions)
 [![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen.svg?style=flat-square&logo=codecov)](https://github.com/latryee/CloakDB)
@@ -14,18 +14,29 @@
 
 <br/>
 
+### ⚡ Quickstart
+
 ```bash
-# ⚡ 3-Second Quickstart with Docker
-docker run --rm -i -v $(pwd):/data cloakdb/cloakdb:latest mask -c /data/cloakdb.yaml < dump.sql > clean_dump.sql
+# 1. CLI Streaming (O(1) Bounded RAM on multi-gigabyte dumps)
+cat input.sql | cloakdb mask -c config.yaml > clean.sql
+
+# 2. Schema Linting & Drift Detection (CI/CD Quality Gate)
+cloakdb lint -c config.yaml --schema schema.sql
+
+# 3. SOC2 / ISO 27001 Cryptographic Audit Trail Verification
+cloakdb audit-log --verify audit_trail.json -c config.yaml
+
+# 4. Zero-Dependency Docker Execution
+docker run --rm -i cloakdb/cloakdb mask < dump.sql > clean.sql
 ```
 
 [Key Capabilities](#-key-capabilities) •
-[Architecture](#-architecture--dataflow) •
-[Competitive Landscape](#-competitive-landscape) •
+[Architecture & Dataflow](#-visual-architecture--dataflow) •
+[Competitive Landscape](#-competitive-feature-matrix) •
 [Benchmarks](#-benchmarks--performance) •
-[Quickstart](#-quickstart--installation) •
-[CLI Guide](#-cli-command-reference) •
-[Configuration](#-configuration-reference-cloakdbyaml) •
+[Installation](#-installation) •
+[CLI Command Reference](#-cli-command-reference) •
+[Configuration Reference](#-configuration-reference-cloakdbyaml) •
 [Plugin System](#-custom-strategy-plugin-system)
 
 </div>
@@ -51,47 +62,40 @@ Creating realistic, relational staging environments and anonymized analytics pip
 
 ---
 
-## 🏗️ Architecture & Dataflow
+## 🏗️ Visual Architecture & Dataflow
 
 ```mermaid
 flowchart LR
-    A["Raw Input Stream<br/>(SQL Dump / PostgreSQL COPY / Parquet / CSV / JSONL)"] --> B["Streaming FSM Parser & Lexer<br/>(O(1) Bounded Memory Buffer)"]
+    A["Raw SQL Stream<br/>(PostgreSQL / MySQL / SQLite / Parquet / CSV)"] --> B["FSM Lexer & Tokenizer<br/>(O(1) Bounded RAM Stream)"]
     
     subgraph Engine["CloakDB Core Engine"]
-        B --> C["Strategy Dispatcher & Rule Matcher"]
-        
-        C --> D["NIST AES-FF1 / FF3-1<br/>Format-Preserving Encryption"]
-        C --> E["Differential Privacy Engine<br/>(Laplace / Gaussian / Budget Tracker)"]
-        C --> F["Salted HMAC Pseudonymizer<br/>& Faker Engine"]
-        C --> G["Third-Party Plugins<br/>(cloakdb.strategies)"]
-        
-        D & E & F & G --> H["Referential Integrity Manager<br/>(Deterministic Composite FK Mapper)"]
+        B --> C["Strategy Engine<br/>(NIST FPE / Diff Privacy / HMAC / Plugins)"]
+        C --> D["Streaming Key Cache<br/>(Deterministic Composite FK Mapper)"]
     end
     
-    H --> I["Sanitized Output Stream<br/>(Clean SQL / Parquet / CSV)"]
+    D --> E["Clean Stream<br/>(Sanitized SQL / CSV / Parquet)"]
     
-    subgraph Observability["Enterprise Observability & Compliance"]
-        H -.-> J["OpenTelemetry Spans & Metrics<br/>(OTLP Tracing Exporter)"]
-        H -.-> K["Structured JSON Logs<br/>(RFC 5424 / ISO 8601)"]
-        H -.-> L["SOC2 / ISO 27001 Signed Audit Log<br/>(HMAC-SHA256 Cryptographic Hash)"]
+    subgraph Compliance["Observability & Compliance"]
+        D -.-> F["OTel Spans & Metrics<br/>(Distributed Tracing)"]
+        D -.-> G["Audit Log<br/>(SOC2 / ISO 27001 Signed HMAC)"]
     end
 ```
 
 ---
 
-## 📊 Competitive Landscape
+## 📊 Competitive Feature Matrix
 
 | Feature | `CloakDB` | `PostgreSQL Anonymizer (anon)` | `Benthos / Redpanda Connect` | `Custom Python Scripts` |
 | :--- | :---: | :---: | :---: | :---: |
+| **Memory Footprint on 10GB+ Dumps** | **Strict $\mathcal{O}(1)$ Bounded RAM** | In-Engine DB RAM overhead | Low to Medium | Unbounded (High OOM Risk) |
 | **Dialect & Format Support** | **Postgres, MySQL, SQLite, Parquet, CSV, JSONL** | PostgreSQL only (In-Engine) | Generic stream / ETL | Fragmented / Ad-hoc |
-| **Memory Footprint** | **Strict $\mathcal{O}(1)$ Bounded RAM** | In-Engine DB RAM overhead | Low to Medium | Unbounded (High Risk) |
-| **Format-Preserving Encryption (FPE)** | **Built-in (FF1 / FF3-1 Feistel)** | ❌ No | ❌ Plugin / Script needed | ❌ Rare / Complex |
-| **Luhn / Checksum Preservation** | **Native (CC, SSN, TCKN)** | ❌ No | ❌ No | ❌ Manual coding |
-| **$(\epsilon, \delta)$ Differential Privacy** | **Exact Budget Tracking & Clamping** | ❌ Basic noise | ❌ No | ❌ No |
+| **Format-Preserving Encryption (FPE)** | **Built-in (NIST SP 800-38G FF1 / FF3-1)** | ❌ No | ❌ Plugin / Script needed | ❌ Rare / Complex |
+| **Luhn / Checksum Preservation** | **Native (Credit Cards, SSN, TCKN)** | ❌ No | ❌ No | ❌ Manual coding |
+| **Differential Privacy Budget Tracking $(\epsilon, \delta)$** | **Exact Budget Consumption & Clamping** | ❌ Basic noise | ❌ No | ❌ No |
+| **OpenTelemetry Observability** | **Native Spans & OTLP Metrics** | ❌ PG Logs only | Native OTel | ❌ No |
+| **Signed SOC2 / ISO 27001 Audit Trails** | **Native HMAC-SHA256 Signed JSON** | ❌ No | ❌ No | ❌ No |
 | **Referential Integrity / Composite FKs** | **Automatic Multi-Table Mapping** | Supported (within single DB) | ❌ Complex state stores | ❌ Brittle SQLite caches |
 | **Schema Drift & PII Linting** | **Native `cloakdb lint`** | ❌ No | ❌ No | ❌ No |
-| **SOC2 Signed Audit Trails** | **Native `cloakdb audit-log`** | ❌ No | ❌ No | ❌ No |
-| **OpenTelemetry Observability** | **Native Spans & OTLP Metrics** | ❌ PG Logs only | Native OTel | ❌ No |
 | **Zero-Installation Docker** | **`<35 MB` Lightweight Image** | Requires PG Extension setup | Binary container | Custom image required |
 
 ---
@@ -110,14 +114,14 @@ Evaluated on AMD Ryzen 9 7950X (16 Cores, 32 Threads), 64GB DDR5, NVMe SSD:
 
 ---
 
-## 🚀 Quickstart & Installation
+## 🚀 Installation
 
 ### Option 1: Install via PyPI
 ```bash
 # Standard installation
 pip install cloakdb
 
-# Enterprise package (includes OpenTelemetry, Apache Parquet, and Faker providers)
+# Enterprise package (includes OpenTelemetry, Apache Parquet, and Cryptography extras)
 pip install "cloakdb[all]"
 ```
 
@@ -138,8 +142,8 @@ cat production_dump.sql | docker run --rm -i -v $(pwd):/data cloakdb/cloakdb:lat
 Streams an input database dump or file, transforms sensitive columns according to `cloakdb.yaml`, and writes sanitized output.
 
 ```bash
-# Basic SQL dump masking
-cloakdb mask -c cloakdb.yaml -i dump.sql -o sanitized.sql
+# Basic SQL dump streaming
+cat input.sql | cloakdb mask -c cloakdb.yaml > clean.sql
 
 # Production-grade execution with OTel tracing and signed SOC2 audit log
 cloakdb mask \
@@ -167,11 +171,11 @@ cloakdb mask \
 Validates an incoming dataset against your `cloakdb.yaml` configuration. Detects missing tables and alerts on unmapped columns containing sensitive PII before applying transformations in production pipelines.
 
 ```bash
-# Lint dump against expected configuration
-cloakdb lint -c cloakdb.yaml -i new_incoming_dump.sql
+# Lint schema against expected configuration
+cloakdb lint -c config.yaml --schema schema.sql
 
 # Strict mode: fail if any table in configuration is missing from dataset
-cloakdb lint -c cloakdb.yaml -i new_incoming_dump.sql --strict
+cloakdb lint -c config.yaml --schema schema.sql --strict
 ```
 
 ---
@@ -181,7 +185,7 @@ Generates or cryptographically verifies signed audit logs. Validates HMAC-SHA256
 
 ```bash
 # Verify audit trail integrity against signing key / configuration salt
-cloakdb audit-log --verify audit_trail.json -c cloakdb.yaml
+cloakdb audit-log --verify audit_trail.json -c config.yaml
 
 # Verification output:
 # [SUCCESS] Audit log signature VALID.

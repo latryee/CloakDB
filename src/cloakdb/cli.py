@@ -828,7 +828,11 @@ def lint(
         ..., "--config", "-c", help="Path to cloakdb.yaml configuration"
     ),
     input_target: str = typer.Option(
-        ..., "--input", "-i", help="Path to SQL dump, CSV, Parquet, or DB URL to validate against"
+        ...,
+        "--input",
+        "-i",
+        "--schema",
+        help="Path to SQL dump, schema file, CSV, Parquet, or DB URL to validate against",
     ),
     strict: bool = typer.Option(
         False, "--strict", help="Fail with error code if any schema drift or unmapped column exists"
