@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Golden integration test fixture suite (`tests/fixtures/`) verifying end-to-end multi-table relational masking.
 - Memory tracking with `tracemalloc` in benchmarking tools and CLI `cloakdb bench`.
 - Automated CodeQL static analysis and Dependabot configuration.
-- Comprehensive unit test suite with 70 passing tests.
+- Comprehensive unit test suite with 73 passing tests.
 
 ### Changed
 - Improved explicit seed scoping and cache-independent `ConsistencyGroup` determinism.

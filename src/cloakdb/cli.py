@@ -28,7 +28,7 @@ from cloakdb.utils.logger import console, err_console
 
 app = typer.Typer(
     name="cloakdb",
-    help="High-performance, deterministic database & SQL dump anonymization CLI.",
+    help="Deterministic database & SQL dump anonymization CLI.",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -53,7 +53,7 @@ def main(
         is_eager=True,
     ),
 ) -> None:
-    """High-performance, deterministic database & SQL dump anonymization CLI."""
+    """Deterministic database & SQL dump anonymization CLI."""
     pass
 
 

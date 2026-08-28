@@ -191,3 +191,71 @@ def test_cli_apply_missing_file_errors(tmp_path: Path):
     res_no_out = runner.invoke(app, ["apply", "-c", str(config_file), "-i", str(sql_file)])
     assert res_no_out.exit_code == 1
     assert "Output path" in res_no_out.output
+
+
+def test_cli_scan_csv_and_output(tmp_path: Path, csv_file: Path):
+    out_yaml = tmp_path / "scanned_csv.yaml"
+    res = runner.invoke(app, ["scan", str(csv_file), "-o", str(out_yaml), "--locale", "tr_TR"])
+    assert res.exit_code == 0
+    assert out_yaml.exists()
+    assert "email" in out_yaml.read_text(encoding="utf-8")
+
+
+def test_cli_scan_no_pii(tmp_path: Path):
+    csv_file = tmp_path / "clean.csv"
+    csv_file.write_text("item_id,count,category\n1,10,appliances\n2,20,tools\n", encoding="utf-8")
+    res = runner.invoke(app, ["scan", str(csv_file)])
+    assert res.exit_code == 0
+    assert "No PII columns detected" in res.stdout
+
+
+def test_cli_live_db_workflows(tmp_path: Path):
+    from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, insert, select
+
+    db_file = tmp_path / "cli_live.db"
+    db_url = f"sqlite:///{db_file}"
+
+    engine = create_engine(db_url)
+    metadata = MetaData()
+    users_tbl = Table(
+        "users",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("email", String),
+        Column("full_name", String),
+    )
+    metadata.create_all(engine)
+
+    with engine.connect() as conn:
+        conn.execute(
+            insert(users_tbl),
+            [
+                {"id": 1, "email": "test1@domain.com", "full_name": "Test User 1"},
+                {"id": 2, "email": "test2@domain.com", "full_name": "Test User 2"},
+            ],
+        )
+        conn.commit()
+
+    out_yaml = tmp_path / "scanned_live.yaml"
+    res_scan = runner.invoke(app, ["scan", db_url, "-o", str(out_yaml)])
+    assert res_scan.exit_code == 0
+    assert out_yaml.exists()
+
+    config_file = tmp_path / "cloakdb.yaml"
+    runner.invoke(app, ["init", "-o", str(config_file)])
+
+    res_prev = runner.invoke(app, ["preview", "-c", str(config_file), "-i", db_url, "-n", "2"])
+    assert res_prev.exit_code == 0
+    assert "Live Table" in res_prev.stdout
+
+    res_apply = runner.invoke(
+        app,
+        ["apply", "-c", str(config_file), "-i", db_url, "--seed", "12345", "--locale", "en_US"],
+    )
+    assert res_apply.exit_code == 0
+    assert "Completed Successfully" in res_apply.stdout
+
+    with engine.connect() as conn:
+        rows = list(conn.execute(select(users_tbl)))
+        assert len(rows) == 2
+        assert rows[0].email != "test1@domain.com"

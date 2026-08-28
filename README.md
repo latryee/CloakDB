@@ -9,7 +9,7 @@
 
 [![CI](https://github.com/latryee/CloakDB/actions/workflows/ci.yml/badge.svg)](https://github.com/latryee/CloakDB/actions)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/latryee/CloakDB)
-[![Coverage](https://img.shields.io/badge/coverage-87%25-brightgreen.svg)](https://github.com/latryee/CloakDB)
+[![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen.svg)](https://github.com/latryee/CloakDB)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 

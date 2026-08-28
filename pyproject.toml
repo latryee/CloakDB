@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cloakdb"
 version = "0.1.0"
-description = "High-performance, deterministic database & SQL dump anonymization CLI"
+description = "Deterministic database & SQL dump anonymization CLI"
 readme = "README.md"
 authors = [
     { name = "latryee", email = "sariyarberkay@gmail.com" }
