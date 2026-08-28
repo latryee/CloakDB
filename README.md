@@ -10,7 +10,7 @@
 [![Python Versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?style=flat-square&logo=python&logoColor=white)](https://pypi.org/project/cloakdb/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](https://opensource.org/licenses/Apache-2.0)
 [![OpenTelemetry Compliant](https://img.shields.io/badge/OpenTelemetry-Compliant-9B59B6.svg?style=flat-square&logo=opentelemetry&logoColor=white)](https://opentelemetry.io/)
-[![Docker Pulls](https://img.shields.io/docker/pulls/cloakdb/cloakdb.svg?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/cloakdb/cloakdb)
+
 
 <br/>
 
