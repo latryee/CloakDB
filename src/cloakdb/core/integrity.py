@@ -54,6 +54,8 @@ class ReferentialIntegrityManager:
 
         # Map 'table.column' -> group_name
         self._column_to_group: dict[str, str] = {}
+        # Map table -> list of (tuple_of_cols, group_name) for composite keys
+        self._composite_groups_by_table: dict[str, list[tuple[tuple[str, ...], str]]] = {}
         # Map group_name -> ConsistencyGroup
         self._group_definitions: dict[str, ConsistencyGroup] = {}
         # Map group_name -> LRUCache
@@ -69,11 +71,25 @@ class ReferentialIntegrityManager:
             self._group_caches[group.name] = LRUCache(self.max_cache_size)
             self._reverse_lookups[group.name] = {}
             for col_ref in group.columns:
-                normalized = self._normalize_column_ref(col_ref)
-                self._column_to_group[normalized] = group.name
+                ref_clean = col_ref.strip()
+                if ".(" in ref_clean and ref_clean.endswith(")"):
+                    # Composite key format: table.(col1, col2)
+                    tbl_part, cols_part = ref_clean.split(".(", 1)
+                    tbl_name = self._normalize_name(tbl_part)
+                    cols_list = tuple(
+                        self._normalize_name(c) for c in cols_part[:-1].split(",") if c.strip()
+                    )
+                    self._composite_groups_by_table.setdefault(tbl_name, []).append((cols_list, group.name))
+                    self._column_to_group[f"{tbl_name}.({','.join(cols_list)})"] = group.name
+                else:
+                    normalized = self._normalize_column_ref(ref_clean)
+                    self._column_to_group[normalized] = group.name
+
+    def _normalize_name(self, name: str) -> str:
+        return name.strip().strip('"').strip("`").strip("[]").lower()
 
     def _normalize_column_ref(self, col_ref: str) -> str:
-        parts = [p.strip().strip('"').strip("`").strip("[]").lower() for p in col_ref.split(".")]
+        parts = [self._normalize_name(p) for p in col_ref.split(".")]
         return ".".join(parts)
 
     def get_group_for_column(self, table_name: str, column_name: str) -> ConsistencyGroup | None:
@@ -83,6 +99,19 @@ class ReferentialIntegrityManager:
         if group_name:
             return self._group_definitions.get(group_name)
         return None
+
+    def get_composite_groups_for_table(
+        self, table_name: str
+    ) -> list[tuple[tuple[str, ...], ConsistencyGroup]]:
+        """Returns all composite column tuples and their ConsistencyGroup definitions for a table."""
+        tbl_norm = self._normalize_name(table_name)
+        composite_entries = self._composite_groups_by_table.get(tbl_norm, [])
+        results: list[tuple[tuple[str, ...], ConsistencyGroup]] = []
+        for cols_tuple, group_name in composite_entries:
+            group_def = self._group_definitions.get(group_name)
+            if group_def:
+                results.append((cols_tuple, group_def))
+        return results
 
     def get_cached_value(self, group_name: str, raw_value: Any) -> Any | None:
         """Retrieves a previously computed pseudonym for a group and raw value."""

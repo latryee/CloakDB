@@ -90,13 +90,24 @@ def evaluate_condition(condition_str: str, row_data: dict[str, Any]) -> bool:
 class CloakEngine:
     """Central processing engine for database anonymization and masking."""
 
-    def __init__(self, config: CloakConfig):
+    def __init__(
+        self,
+        config: CloakConfig,
+        incremental_since: str | None = None,
+        incremental_column: str | None = None,
+    ):
         self.config = config
+        self.incremental_since = incremental_since
+        self.incremental_column = incremental_column
         self.stats = MaskingStats()
+        cache_enabled = (
+            self.config.global_settings.cache_pseudonyms
+            and not getattr(self.config.global_settings, "stateless", False)
+        )
         self.integrity_manager = ReferentialIntegrityManager(
             groups=config.consistency_groups,
             max_cache_size=config.global_settings.max_cache_size,
-            cache_enabled=config.global_settings.cache_pseudonyms,
+            cache_enabled=cache_enabled,
         )
 
         # Normalize table names for case-insensitive / quoted lookup
@@ -124,41 +135,64 @@ class CloakEngine:
     ) -> list[Any]:
         """Masks an ordered list of values corresponding to column names in a table."""
         tbl_rule = self.get_table_rule(table_name)
-        if not tbl_rule or not tbl_rule.columns:
+        composite_groups = self.integrity_manager.get_composite_groups_for_table(table_name)
+        if (not tbl_rule or not tbl_rule.columns) and not composite_groups:
             return row_values
 
-        # Build column index to rule map
-        normalized_cols = [self._normalize_name(c) for c in column_names]
-        rule_map: dict[int, ColumnRule] = {}
-        for col_name, col_rule in tbl_rule.columns.items():
-            norm = self._normalize_name(col_name)
-            if norm in normalized_cols:
-                idx = normalized_cols.index(norm)
-                rule_map[idx] = col_rule
+        row_dict = dict(zip(column_names, row_values))
+        masked_dict = self.mask_record(table_name, row_dict, row_index=row_index)
+        return [masked_dict.get(col, orig) for col, orig in zip(column_names, row_values)]
 
-        if not rule_map:
-            return row_values
+    def _apply_composite_groups(self, table_name: str, record: dict[str, Any]) -> dict[str, Any]:
+        """Applies referential integrity consistency to multi-column composite keys."""
+        composite_groups = self.integrity_manager.get_composite_groups_for_table(table_name)
+        if not composite_groups:
+            return dict(record)
 
-        row_dict = dict(zip(normalized_cols, row_values))
-        output_values = list(row_values)
+        output = dict(record)
+        norm_keys = {self._normalize_name(k): k for k in record.keys()}
 
-        for col_idx, col_rule in rule_map.items():
-            if col_idx >= len(row_values):
+        for cols_tuple, group in composite_groups:
+            if not all(c in norm_keys for c in cols_tuple):
                 continue
-            orig_val = row_values[col_idx]
-            col_name = column_names[col_idx]
-            masked_val = self._apply_column_rule(
-                table_name=table_name,
-                column_name=col_name,
-                value=orig_val,
-                rule=col_rule,
-                row_index=row_index,
-                row_data=row_dict,
-            )
-            output_values[col_idx] = masked_val
 
-        self.stats.rows_processed += 1
-        return output_values
+            actual_keys = [norm_keys[c] for c in cols_tuple]
+            raw_vals = tuple(record[k] for k in actual_keys)
+
+            if any(v is None for v in raw_vals):
+                continue
+
+            cached_tuple = self.integrity_manager.get_cached_value(group.name, raw_vals)
+            if cached_tuple is not None and isinstance(cached_tuple, (tuple, list)):
+                for k, masked_v in zip(actual_keys, cached_tuple):
+                    output[k] = masked_v
+                self.stats.cells_masked += len(actual_keys)
+                continue
+
+            # Deterministic composite HMAC derivation
+            import hashlib
+            import hmac
+
+            salt = self.config.global_settings.salt
+            masked_list: list[Any] = []
+            for idx, orig_v in enumerate(raw_vals):
+                token = f"{group.name}:{raw_vals}:{idx}".encode("utf-8")
+                h = hmac.new(salt.encode("utf-8"), token, hashlib.sha256).digest()
+                res_val: str | int
+                if isinstance(orig_v, int):
+                    res_val = 100000 + (int.from_bytes(h[:8], "big") % 899999)
+                else:
+                    res_val = h.hex()[:16]
+                masked_list.append(res_val)
+
+            masked_tuple = tuple(masked_list)
+            self.integrity_manager.store_cached_value(group.name, raw_vals, masked_tuple)
+
+            for k, masked_v in zip(actual_keys, masked_tuple):
+                output[k] = masked_v
+            self.stats.cells_masked += len(actual_keys)
+
+        return output
 
     def mask_record(
         self,
@@ -167,25 +201,44 @@ class CloakEngine:
         row_index: int = 0,
     ) -> dict[str, Any]:
         """Masks a dictionary record representing a database row."""
+        output_record = self._apply_composite_groups(table_name, record)
         tbl_rule = self.get_table_rule(table_name)
         if not tbl_rule or not tbl_rule.columns:
-            return record
+            self.stats.rows_processed += 1
+            return output_record
 
-        output_record = dict(record)
         norm_keys = {self._normalize_name(k): k for k in record.keys()}
+
+        # Incremental masking check
+        if self.incremental_since:
+            inc_col = self._normalize_name(self.incremental_column) if self.incremental_column else None
+            matched_key = None
+            if inc_col:
+                matched_key = norm_keys.get(inc_col)
+            else:
+                for candidate in ("updated_at", "created_at", "modified_at", "timestamp", "date"):
+                    if candidate in norm_keys:
+                        matched_key = norm_keys[candidate]
+                        break
+
+            if matched_key and record.get(matched_key) is not None:
+                val_str = str(record[matched_key])
+                if val_str < self.incremental_since:
+                    self.stats.rows_processed += 1
+                    return dict(record)
 
         for col_name, col_rule in tbl_rule.columns.items():
             norm_col = self._normalize_name(col_name)
             if norm_col in norm_keys:
                 actual_key = norm_keys[norm_col]
-                orig_val = record[actual_key]
+                orig_val = output_record[actual_key]
                 masked_val = self._apply_column_rule(
                     table_name=table_name,
                     column_name=actual_key,
                     value=orig_val,
                     rule=col_rule,
                     row_index=row_index,
-                    row_data=record,
+                    row_data=output_record,
                 )
                 output_record[actual_key] = masked_val
 

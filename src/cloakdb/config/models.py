@@ -91,6 +91,10 @@ class GlobalConfig(BaseModel):
         ...,
         description="HMAC secret salt for deterministic hashing",
     )
+    salt_fingerprint: str | None = Field(
+        default=None,
+        description="Deterministic SHA-256 fingerprint of the salt to ensure FK integrity across runs",
+    )
     locale: str = Field(
         default="en_US",
         description="Locale for synthetic Faker generation (e.g. en_US, tr_TR, de_DE, fr_FR)",
@@ -104,6 +108,10 @@ class GlobalConfig(BaseModel):
     cache_pseudonyms: bool = Field(
         default=True,
         description="Cache synthetic replacements in memory to ensure consistent cross-table mapping",
+    )
+    stateless: bool = Field(
+        default=False,
+        description="Run in purely stateless mode with O(1) memory and no in-memory cache",
     )
     max_cache_size: int = Field(
         default=500000,
@@ -119,6 +127,18 @@ class GlobalConfig(BaseModel):
                 "least 32 chars, e.g. `python -c 'import secrets; print(secrets.token_hex(32))'`."
             )
         return v
+
+    def compute_fingerprint(self) -> str:
+        """Calculates the SHA-256 fingerprint for the current active salt."""
+        import hashlib
+
+        return hashlib.sha256(self.salt.strip().encode("utf-8")).hexdigest()[:16]
+
+    def verify_fingerprint(self) -> bool:
+        """Verifies if the configured salt_fingerprint matches the current active salt."""
+        if not self.salt_fingerprint:
+            return True
+        return self.salt_fingerprint == self.compute_fingerprint()
 
 
 class CloakConfig(BaseModel):

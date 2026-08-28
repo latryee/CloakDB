@@ -84,7 +84,7 @@ class PIIDetector:
     PATTERNS = {
         "email": re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"),
         "phone": re.compile(
-            r"^\+?[0-9]{1,4}?[-.\s]?\(?[0-9]{1,3}?\)?[-.\s]?[0-9]{3,4}[-.\s]?[0-9]{3,4}$"
+            r"^\+?[0-9]{1,4}?[-.\s]?\(?[0-9]{1,4}?\)?(?:[-.\s]?[0-9]{1,5}){2,5}$"
         ),
         "credit_card": re.compile(
             r"^(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})$"
@@ -198,33 +198,48 @@ class PIIDetector:
         self,
         column_name: str,
         sample_values: list[Any],
+        data_only: bool = False,
     ) -> PIIDetectionResult | None:
-        """Runs multi-layered heuristics against a column name and its sample values."""
+        """Runs multi-layered heuristics against a column name and its sample values.
+
+        Args:
+            column_name: The name of the column.
+            sample_values: List of sample values from the dataset.
+            data_only: If True, skips column name keyword heuristics and checks only data values.
+        """
         non_null_samples = [
             str(v).strip() for v in sample_values if v is not None and str(v).strip() != ""
         ]
         norm_col = column_name.lower().strip().strip('"').strip("`").strip("[]")
 
-        # 1. Match semantic column keywords
-        for pii_type, keywords in self.NAME_KEYWORDS.items():
-            for kw in keywords:
-                if kw == norm_col or norm_col.endswith(f"_{kw}") or norm_col.startswith(f"{kw}_"):
-                    strategy, params = self._get_recommendation(pii_type)
-                    return PIIDetectionResult(
-                        column_name=column_name,
-                        pii_type=pii_type,
-                        confidence=0.90,
-                        recommended_strategy=strategy,
-                        recommended_params=params,
-                        sample_matches=non_null_samples[:3],
-                    )
+        # 1. Match semantic column keywords (if not in data_only verification mode)
+        if not data_only:
+            for pii_type, keywords in self.NAME_KEYWORDS.items():
+                for kw in keywords:
+                    if kw == norm_col or norm_col.endswith(f"_{kw}") or norm_col.startswith(f"{kw}_"):
+                        strategy, params = self._get_recommendation(pii_type)
+                        return PIIDetectionResult(
+                            column_name=column_name,
+                            pii_type=pii_type,
+                            confidence=0.90,
+                            recommended_strategy=strategy,
+                            recommended_params=params,
+                            sample_matches=non_null_samples[:3],
+                        )
 
         if not non_null_samples:
             return None
 
+        # Filter out already masked values (containing '*' or 'REDACTED' or '[MASKED]')
+        unmasked_samples = [
+            v for v in non_null_samples if "*" not in v and "REDACTED" not in v.upper() and "[MASKED]" not in v.upper()
+        ]
+        if not unmasked_samples:
+            return None
+
         # 2. Check sample values with regex and checksum algorithms
-        email_matches = sum(1 for v in non_null_samples if self.PATTERNS["email"].match(v))
-        if email_matches / len(non_null_samples) >= 0.5:
+        email_matches = sum(1 for v in unmasked_samples if self.PATTERNS["email"].match(v))
+        if email_matches / len(unmasked_samples) >= 0.5:
             strategy, params = self._get_recommendation("email")
             return PIIDetectionResult(
                 column_name=column_name,
@@ -232,16 +247,16 @@ class PIIDetector:
                 confidence=0.95,
                 recommended_strategy=strategy,
                 recommended_params=params,
-                sample_matches=non_null_samples[:3],
+                sample_matches=unmasked_samples[:3],
             )
 
         # Check for Credit Card: require BOTH regex match and Luhn algorithm validity
         cc_matches = sum(
             1
-            for v in non_null_samples
+            for v in unmasked_samples
             if self.PATTERNS["credit_card"].match(re.sub(r"[\s-]", "", v)) and _validate_luhn(v)
         )
-        if cc_matches / len(non_null_samples) >= 0.3:
+        if cc_matches / len(unmasked_samples) >= 0.3:
             strategy, params = self._get_recommendation("credit_card")
             return PIIDetectionResult(
                 column_name=column_name,
@@ -249,12 +264,12 @@ class PIIDetector:
                 confidence=0.98,
                 recommended_strategy=strategy,
                 recommended_params=params,
-                sample_matches=non_null_samples[:3],
+                sample_matches=unmasked_samples[:3],
             )
 
         # Check for TCKN (Turkish Citizen ID)
-        tckn_matches = sum(1 for v in non_null_samples if _validate_tckn(v))
-        if tckn_matches / len(non_null_samples) >= 0.3:
+        tckn_matches = sum(1 for v in unmasked_samples if _validate_tckn(v))
+        if tckn_matches / len(unmasked_samples) >= 0.3:
             strategy, params = self._get_recommendation("tckn")
             return PIIDetectionResult(
                 column_name=column_name,
@@ -262,12 +277,12 @@ class PIIDetector:
                 confidence=0.98,
                 recommended_strategy=strategy,
                 recommended_params=params,
-                sample_matches=non_null_samples[:3],
+                sample_matches=unmasked_samples[:3],
             )
 
         # Check for IBAN
-        iban_matches = sum(1 for v in non_null_samples if _validate_iban(v))
-        if iban_matches / len(non_null_samples) >= 0.3:
+        iban_matches = sum(1 for v in unmasked_samples if _validate_iban(v))
+        if iban_matches / len(unmasked_samples) >= 0.3:
             strategy, params = self._get_recommendation("iban")
             return PIIDetectionResult(
                 column_name=column_name,
@@ -275,11 +290,19 @@ class PIIDetector:
                 confidence=0.98,
                 recommended_strategy=strategy,
                 recommended_params=params,
-                sample_matches=non_null_samples[:3],
+                sample_matches=unmasked_samples[:3],
             )
 
-        phone_matches = sum(1 for v in non_null_samples if self.PATTERNS["phone"].match(v))
-        if phone_matches / len(non_null_samples) >= 0.5:
+        phone_matches = sum(
+            1
+            for v in unmasked_samples
+            if (
+                (v.startswith("+") or any(char in v for char in ("-", " ", "(", ")", ".")))
+                and self.PATTERNS["phone"].match(v)
+                and 7 <= sum(c.isdigit() for c in v) <= 15
+            )
+        )
+        if phone_matches / len(unmasked_samples) >= 0.5:
             strategy, params = self._get_recommendation("phone")
             return PIIDetectionResult(
                 column_name=column_name,
@@ -287,7 +310,7 @@ class PIIDetector:
                 confidence=0.85,
                 recommended_strategy=strategy,
                 recommended_params=params,
-                sample_matches=non_null_samples[:3],
+                sample_matches=unmasked_samples[:3],
             )
 
         # Check for high-entropy secrets / hashes

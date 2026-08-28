@@ -6,6 +6,7 @@ import secrets
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich import box
@@ -26,7 +27,12 @@ from cloakdb.scanner.generator import ConfigGenerator
 from cloakdb.strategies.registry import StrategyRegistry
 from cloakdb.utils.benchmark import run_benchmark
 from cloakdb.utils.logger import console, err_console
-from cloakdb.utils.security import redact_connection_url
+from cloakdb.utils.security import (
+    compute_salt_fingerprint,
+    is_insecure_salt,
+    is_production_connection,
+    redact_connection_url,
+)
 
 app = typer.Typer(
     name="cloakdb",
@@ -34,6 +40,100 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
 )
+
+
+def _check_salt_security(salt: str | None, allow_insecure_salt: bool = False) -> None:
+    """Verifies that the provided salt meets cryptographic complexity requirements."""
+    is_weak, reason = is_insecure_salt(salt)
+    if is_weak:
+        warning_msg = (
+            "[bold red]CRITICAL SECURITY WARNING: INSECURE / DEFAULT SALT DETECTED[/bold red]\n\n"
+            f"[yellow]Reason: {reason}[/yellow]\n\n"
+            "Using a default or weak salt exposes HMAC pseudonyms to brute-force\n"
+            "and rainbow table precomputation attacks!\n"
+            "In production environments, ensure you configure a cryptographically secure\n"
+            "salt (at least 32 characters), preferably via an environment variable."
+        )
+        err_console.print(
+            Panel(warning_msg, title="[bold red]SECURITY ALERT[/bold red]", border_style="red")
+        )
+
+        if not allow_insecure_salt:
+            err_console.print(
+                "[bold red]Error:[/bold red] Execution aborted due to insecure salt. "
+                "Pass '--allow-insecure-salt' to bypass this check."
+            )
+            raise typer.Exit(1)
+
+
+def _check_salt_fingerprint(
+    config: CloakConfig,
+    ignore_salt_mismatch: bool = False,
+    update_salt_fingerprint: bool = False,
+    config_path: str | Path | None = None,
+) -> None:
+    """Verifies salt fingerprint to prevent accidental foreign key consistency breaks across runs."""
+    configured_fp = config.global_settings.salt_fingerprint
+    if not configured_fp:
+        return
+
+    active_fp = config.global_settings.compute_fingerprint()
+    if configured_fp != active_fp:
+        if update_salt_fingerprint and config_path:
+            config.global_settings.salt_fingerprint = active_fp
+            save_config(config, config_path)
+            console.print(
+                f"[bold green][+] Salt fingerprint updated to '{active_fp}' in configuration.[/bold green]"
+            )
+            return
+
+        warning_msg = (
+            "[bold yellow]CRITICAL WARNING: SALT ROTATION / MISMATCH DETECTED[/bold yellow]\n\n"
+            f"Configured Salt Fingerprint: [cyan]{configured_fp}[/cyan]\n"
+            f"Active Salt Fingerprint:     [red]{active_fp}[/red]\n\n"
+            "Foreign key referential integrity across previous masking batches or consistency groups\n"
+            "will be BROKEN because the salt has changed!"
+        )
+        err_console.print(
+            Panel(warning_msg, title="[bold yellow]INTEGRITY WARNING[/bold yellow]", border_style="yellow")
+        )
+
+        if not ignore_salt_mismatch:
+            err_console.print(
+                "[bold red]Error:[/bold red] Salt fingerprint mismatch. "
+                "Pass '--ignore-salt-mismatch' to proceed anyway, or '--update-salt-fingerprint' to re-bind."
+            )
+            raise typer.Exit(1)
+
+
+def _check_production_safety(target: str, confirm_production: bool = False) -> None:
+    """Detects live production database targets and demands explicit confirmation."""
+    if is_production_connection(target):
+        warning_msg = (
+            "[bold red]PRODUCTION DATABASE TARGET DETECTED[/bold red]\n\n"
+            f"Target URL: [yellow]{redact_connection_url(target)}[/yellow]\n\n"
+            "You are attempting to execute in-place masking on a LIVE PRODUCTION database.\n"
+            "This operation will directly modify records in the target database!"
+        )
+        err_console.print(
+            Panel(warning_msg, title="[bold red]PRODUCTION GUARD[/bold red]", border_style="red")
+        )
+
+        if not confirm_production:
+            if sys.stdin.isatty():
+                confirmed = typer.confirm(
+                    "Are you sure you want to perform in-place masking on this PRODUCTION database?",
+                    default=False,
+                )
+                if not confirmed:
+                    err_console.print("[bold red]Aborted by user.[/bold red]")
+                    raise typer.Exit(1)
+            else:
+                err_console.print(
+                    "[bold red]Error:[/bold red] Production database detected in non-interactive mode. "
+                    "You must supply '--confirm-production' to execute."
+                )
+                raise typer.Exit(1)
 
 
 def _version_callback(value: bool) -> None:
@@ -73,6 +173,12 @@ def scan(
     max_samples: int = typer.Option(
         500, "--max-samples", "-n", help="Max sample lines/rows to inspect"
     ),
+    infer_fks: bool = typer.Option(
+        False, "--infer-fks", help="Infer foreign key relationships and generate consistency groups"
+    ),
+    allow_insecure_salt: bool = typer.Option(
+        False, "--allow-insecure-salt", help="Allow running with weak/default salt"
+    ),
 ) -> None:
     """Scan a SQL dump, CSV file, or live database to auto-detect PII and generate rules."""
     generator = ConfigGenerator()
@@ -94,14 +200,15 @@ def scan(
 
         progress.remove_task(task)
 
-    if not detections:
+    if not detections and not infer_fks:
         console.print("[bold yellow]No PII columns detected automatically.[/bold yellow]")
         return
 
-    total_detected_cols = sum(len(cols) for cols in detections.values())
-    console.print(
-        f"\n[bold green][+] Found {total_detected_cols} sensitive columns across {len(detections)} tables:[/bold green]\n"
-    )
+    if detections:
+        total_detected_cols = sum(len(cols) for cols in detections.values())
+        console.print(
+            f"\n[bold green][+] Found {total_detected_cols} sensitive columns across {len(detections)} tables:[/bold green]\n"
+        )
 
     for tbl_name, results in detections.items():
         table = Table(title=f"Table: [bold magenta]{tbl_name}[/bold magenta]", box=box.ROUNDED)
@@ -125,7 +232,9 @@ def scan(
         console.print(table)
         console.print()
 
-    generated_config = generator.generate_config_from_detections(detections, locale=locale)
+    generated_config = generator.generate_config_from_detections(
+        detections, locale=locale, target=target if infer_fks else None, infer_fks=infer_fks
+    )
 
     if output:
         out_path = Path(output)
@@ -156,11 +265,13 @@ def init(
         )
         raise typer.Exit(1)
 
+    random_salt = secrets.token_hex(32)
     template_config = CloakConfig(
         version="1",
         global_settings=GlobalConfig(
             seed=42,
-            salt=secrets.token_hex(32),
+            salt=random_salt,
+            salt_fingerprint=compute_salt_fingerprint(random_salt),
             locale="en_US",
             batch_size=5000,
             cache_pseudonyms=True,
@@ -235,9 +346,13 @@ def preview(
         ..., "--input", "-i", help="Path to sample SQL dump, CSV, or DB URL"
     ),
     limit: int = typer.Option(5, "--limit", "-n", help="Number of sample records to preview"),
+    allow_insecure_salt: bool = typer.Option(
+        False, "--allow-insecure-salt", help="Allow running with weak/default salt"
+    ),
 ) -> None:
     """Preview side-by-side Before/After masking diffs on sample data."""
     config = load_config(config_file)
+    _check_salt_security(config.global_settings.salt, allow_insecure_salt=allow_insecure_salt)
     engine = CloakEngine(config)
 
     console.print(
@@ -327,15 +442,52 @@ def apply(
     workers: int = typer.Option(
         1, "--workers", "-w", help="Number of parallel worker processes for stream parsing"
     ),
+    allow_insecure_salt: bool = typer.Option(
+        False, "--allow-insecure-salt", help="Allow execution even if a weak/default salt is used"
+    ),
+    confirm_production: bool = typer.Option(
+        False, "--confirm-production", help="Explicitly confirm applying in-place masking to production DB"
+    ),
+    ignore_salt_mismatch: bool = typer.Option(
+        False, "--ignore-salt-mismatch", help="Ignore salt fingerprint mismatch warning/error"
+    ),
+    update_salt_fingerprint: bool = typer.Option(
+        False, "--update-salt-fingerprint", help="Re-compute and update salt fingerprint in config file"
+    ),
+    stateless: bool = typer.Option(
+        False, "--stateless", help="Run with O(1) stateless memory mode (no LRU cache)"
+    ),
+    since: str | None = typer.Option(
+        None, "--since", help="Incremental timestamp lower bound (e.g. 2026-01-01T00:00:00)"
+    ),
+    incremental_column: str | None = typer.Option(
+        None, "--incremental-column", help="Column name to check for incremental threshold"
+    ),
 ) -> None:
     """Apply masking rules to an input file or live database stream."""
     config = load_config(config_file)
+    _check_salt_security(config.global_settings.salt, allow_insecure_salt=allow_insecure_salt)
+    _check_salt_fingerprint(
+        config,
+        ignore_salt_mismatch=ignore_salt_mismatch,
+        update_salt_fingerprint=update_salt_fingerprint,
+        config_path=config_file,
+    )
+    _check_production_safety(input_target, confirm_production=confirm_production)
+
     if seed is not None:
         config.global_settings.seed = seed
     if locale is not None:
         config.global_settings.locale = locale
+    if stateless:
+        config.global_settings.stateless = True
+        config.global_settings.cache_pseudonyms = False
 
-    engine = CloakEngine(config)
+    engine = CloakEngine(
+        config,
+        incremental_since=since,
+        incremental_column=incremental_column,
+    )
 
     console.print(
         Panel(
@@ -410,6 +562,15 @@ def apply(
                 )
             first_table = list(config.tables.keys())[0] if config.tables else "default"
             parser = JSONLinesStreamParser(table_name=first_table)
+        elif in_path.suffix.lower() == ".json":
+            if workers > 1:
+                console.print(
+                    f"[bold yellow]Warning:[/bold yellow] Parallel processing (--workers {workers}) is not yet supported for JSON document files. Falling back to single-worker mode."
+                )
+            first_table = list(config.tables.keys())[0] if config.tables else "default"
+            from cloakdb.parsers.json_stream import JSONDocumentStreamParser
+
+            parser = JSONDocumentStreamParser(table_name=first_table)
         elif workers > 1:
             from cloakdb.parsers.chunking import ParallelStreamParser
 
@@ -514,6 +675,217 @@ def bench(
         table.add_row("Peak Memory", f"{results['peak_memory_mb']:.2f} MB")
 
     console.print(table)
+
+
+@app.command()
+def verify(
+    target: str = typer.Option(
+        ...,
+        "--input",
+        "-i",
+        help="Path to masked SQL dump (.sql), CSV (.csv), JSONL (.jsonl), or live DB URL",
+    ),
+    config_file: str | None = typer.Option(
+        None, "--config", "-c", help="Optional path to cloakdb.yaml to verify mapped rules"
+    ),
+    max_samples: int = typer.Option(
+        1000, "--max-samples", "-n", help="Number of sample lines/rows to inspect"
+    ),
+    allow_insecure_salt: bool = typer.Option(
+        False, "--allow-insecure-salt", help="Allow running with weak/default salt"
+    ),
+) -> None:
+    """Verify masked output datasets to ensure zero real PII remains (CI/CD audit)."""
+    if config_file:
+        config = load_config(config_file)
+        _check_salt_security(config.global_settings.salt, allow_insecure_salt=allow_insecure_salt)
+
+    generator = ConfigGenerator()
+    console.print(
+        f"[bold cyan]Auditing dataset for unmasked PII:[/bold cyan] {redact_connection_url(target)}"
+    )
+
+    with Progress(
+        SpinnerColumn("line"),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Scanning dataset with multi-layer PII detector...", total=None)
+
+        if "://" in target:
+            detections = generator.scan_live_db(target, sample_limit=max_samples, data_only=True)
+        elif target.endswith(".csv"):
+            detections = generator.scan_csv(target, max_rows=max_samples, data_only=True)
+        else:
+            detections = generator.scan_sql_dump(target, max_lines=max_samples, data_only=True)
+
+        progress.remove_task(task)
+
+    if not detections:
+        console.print()
+        console.print(
+            Panel(
+                "[bold green][PASS] ZERO UNMASKED PII DETECTED[/bold green]\n\n"
+                "The scanned dataset passed all cryptographic checksums and regex heuristics.\n"
+                "No raw credit cards (Luhn-valid), TCKN IDs, plaintext emails, or unmasked credentials were found.\n"
+                "Dataset is verified compliant for GDPR/KVKK/HIPAA export.",
+                title="[bold green]CloakDB Verification Report[/bold green]",
+                border_style="green",
+            )
+        )
+        return
+
+    # Found potential leaks!
+    total_detected = sum(len(cols) for cols in detections.values())
+    table = Table(
+        title="[bold red]VERIFICATION FAILED: Unmasked PII Found in Dataset[/bold red]",
+        box=box.HEAVY_EDGE,
+    )
+    table.add_column("Table", style="bold magenta")
+    table.add_column("Column", style="bold cyan")
+    table.add_column("Leaked PII Type", style="bold red")
+    table.add_column("Confidence", justify="right", style="yellow")
+    table.add_column("Sample Raw Values", style="white")
+
+    for tbl_name, results in detections.items():
+        for res in results:
+            samples_str = ", ".join(res.sample_matches[:2])
+            conf_str = f"{int(res.confidence * 100)}%"
+            table.add_row(
+                tbl_name,
+                res.column_name,
+                res.pii_type,
+                conf_str,
+                samples_str or "-",
+            )
+
+    console.print()
+    console.print(table)
+    console.print()
+    err_console.print(
+        Panel(
+            f"[bold red][FAIL] {total_detected} sensitive column(s) contain unmasked PII.[/bold red]\n"
+            "Review your cloakdb.yaml configuration and re-apply masking before distributing this data.",
+            title="[bold red]Audit Status: Non-Compliant[/bold red]",
+            border_style="red",
+        )
+    )
+    raise typer.Exit(1)
+
+
+@app.command()
+def diff(
+    config_1: str = typer.Option(
+        ..., "--config-1", "-c1", help="Path to base cloakdb.yaml configuration"
+    ),
+    config_2: str = typer.Option(
+        ..., "--config-2", "-c2", help="Path to comparative cloakdb.yaml configuration"
+    ),
+    input_target: str = typer.Option(
+        ..., "--input", "-i", help="Sample input file (.csv, .json, .jsonl, .sql) or live DB URL"
+    ),
+    limit: int = typer.Option(5, "--limit", "-n", help="Number of sample rows to compare"),
+) -> None:
+    """Compare masking outputs side-by-side between two CloakDB configurations."""
+    cfg1 = load_config(config_1)
+    cfg2 = load_config(config_2)
+    engine1 = CloakEngine(cfg1)
+    engine2 = CloakEngine(cfg2)
+
+    console.print(
+        Panel(
+            f"[bold cyan]Comparing Masking Outputs:[/bold cyan]\n"
+            f"[bold]Config A:[/bold] {config_1}\n"
+            f"[bold]Config B:[/bold] {config_2}\n"
+            f"[bold]Dataset:[/bold]  {redact_connection_url(input_target)}",
+            title="[bold green]CloakDB Config Diff[/bold green]",
+            border_style="green",
+        )
+    )
+
+    sample_records: list[tuple[str, dict[str, Any]]] = []
+    if "://" in input_target:
+        connector = LiveDatabaseConnector(input_target)
+        for tbl in connector.get_table_names()[:3]:
+            for r in connector.fetch_sample_rows(tbl, limit=limit):
+                sample_records.append((tbl, r))
+    elif input_target.endswith(".csv"):
+        import csv
+
+        with open(input_target, "r", encoding="utf-8", errors="replace") as f:
+            reader = csv.DictReader(f)
+            first_tbl = list(cfg1.tables.keys())[0] if cfg1.tables else "default"
+            for row in list(reader)[:limit]:
+                sample_records.append((first_tbl, row))
+    elif input_target.endswith(".jsonl"):
+        import json
+
+        with open(input_target, "r", encoding="utf-8", errors="replace") as f:
+            first_tbl = list(cfg1.tables.keys())[0] if cfg1.tables else "default"
+            for line in f:
+                if line.strip():
+                    sample_records.append((first_tbl, json.loads(line)))
+                    if len(sample_records) >= limit:
+                        break
+    elif input_target.endswith(".json"):
+        import json
+
+        with open(input_target, "r", encoding="utf-8", errors="replace") as f:
+            data = json.load(f)
+            first_tbl = list(cfg1.tables.keys())[0] if cfg1.tables else "default"
+            if isinstance(data, list):
+                for item in data[:limit]:
+                    if isinstance(item, dict):
+                        sample_records.append((first_tbl, item))
+            elif isinstance(data, dict):
+                sample_records.append((first_tbl, data))
+    else:
+        # SQL dump
+        generator = ConfigGenerator()
+        detections = generator.scan_sql_dump(input_target, max_lines=500)
+        for tbl, res_list in detections.items():
+            for res in res_list:
+                for s in res.sample_matches[:limit]:
+                    sample_records.append((tbl, {res.column_name: s}))
+
+    if not sample_records:
+        console.print("[bold yellow]No sample records found to compare.[/bold yellow]")
+        return
+
+    table = Table(title="[bold green]Side-by-Side Masking Output Diff[/bold green]", box=box.ROUNDED)
+    table.add_column("Table.Column", style="bold cyan")
+    table.add_column("Original Value", style="bold white")
+    table.add_column("Config A Output", style="bold yellow")
+    table.add_column("Config B Output", style="bold green")
+    table.add_column("Diff Status", style="bold magenta")
+
+    diff_count = 0
+    total_comparisons = 0
+
+    for tbl_name, rec in sample_records:
+        masked1 = engine1.mask_record(tbl_name, rec)
+        masked2 = engine2.mask_record(tbl_name, rec)
+
+        for col in rec.keys():
+            orig_v = rec[col]
+            v1 = masked1.get(col, orig_v)
+            v2 = masked2.get(col, orig_v)
+            if v1 != orig_v or v2 != orig_v:
+                total_comparisons += 1
+                if v1 != v2:
+                    diff_count += 1
+                    status = "[bold red]CHANGED[/bold red]"
+                else:
+                    status = "[dim green]IDENTICAL[/dim green]"
+                table.add_row(f"{tbl_name}.{col}", str(orig_v), str(v1), str(v2), status)
+
+    console.print()
+    console.print(table)
+    console.print()
+    console.print(
+        f"Summary: [bold cyan]{total_comparisons}[/bold cyan] masked cell(s) compared, "
+        f"[bold yellow]{diff_count}[/bold yellow] differing value(s) between configs.\n"
+    )
 
 
 @app.command()

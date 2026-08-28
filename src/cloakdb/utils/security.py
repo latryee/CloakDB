@@ -3,6 +3,100 @@
 from __future__ import annotations
 
 
+import hashlib
+import re
+from urllib.parse import urlparse
+
+KNOWN_WEAK_SALTS: set[str] = {
+    "cloakdb-salt",
+    "cloakdb-default-salt-v1",
+    "cloakdb-secure-salt",
+    "default",
+    "secret",
+    "password",
+    "123456",
+    "test",
+    "salt",
+    "admin",
+    "changeme",
+    "placeholder",
+    "demo",
+    "sample",
+    "cloakdb",
+}
+
+
+def is_insecure_salt(salt: str | None) -> tuple[bool, str]:
+    """Evaluates if a salt string is cryptographically insecure or default.
+
+    Returns:
+        (is_insecure: bool, reason: str)
+    """
+    if salt is None or not isinstance(salt, str):
+        return True, "Salt is missing or not a string."
+
+    trimmed = salt.strip()
+    if not trimmed:
+        return True, "Salt is empty."
+
+    if trimmed.lower() in KNOWN_WEAK_SALTS or any(
+        trimmed.lower().startswith(w) for w in ("cloakdb-salt", "default", "test-salt")
+    ):
+        return (
+            True,
+            f"Salt '{trimmed}' is a known default/placeholder value vulnerable to precomputation.",
+        )
+
+    if len(trimmed) < 32:
+        return (
+            True,
+            f"Salt length ({len(trimmed)} chars) is below the minimum 32-character requirement for brute-force resistance.",
+        )
+
+    return False, ""
+
+
+def compute_salt_fingerprint(salt: str) -> str:
+    """Computes a deterministic SHA-256 fingerprint (first 16 hex chars) of a salt."""
+    if not salt:
+        return ""
+    return hashlib.sha256(salt.strip().encode("utf-8")).hexdigest()[:16]
+
+
+def is_production_connection(url: str) -> bool:
+    """Detects if a connection URL appears to target a live production database.
+
+    Inspects hostname, database name, and URL components for keywords such as:
+    'prod', 'production', 'live', 'main', 'master', 'rds.amazonaws.com', etc.
+    """
+    if not isinstance(url, str) or "://" not in url:
+        return False
+
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        path = (parsed.path or "").lower().lstrip("/")
+
+        prod_patterns = [
+            r"\bprod\b",
+            r"production",
+            r"\blive\b",
+            r"\bmaster\b",
+            r"main[-_]?db",
+            r"rds\.amazonaws\.com",
+            r"database\.windows\.net",
+            r"gcp\.cloudsql",
+        ]
+
+        for pattern in prod_patterns:
+            if re.search(pattern, host) or re.search(pattern, path):
+                return True
+
+        return False
+    except Exception:
+        return False
+
+
 def redact_connection_url(url: str) -> str:
     """Masks the password portion of userinfo in database connection URLs.
 

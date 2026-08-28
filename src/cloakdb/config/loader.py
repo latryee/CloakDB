@@ -65,7 +65,9 @@ def dump_config_to_yaml(config: CloakConfig) -> str:
 
 
 def save_config(config: CloakConfig, output_path: str | Path) -> None:
-    """Saves a CloakConfig instance to a YAML file."""
+    """Saves a CloakConfig instance to a YAML file, automatically computing salt_fingerprint."""
+    if not config.global_settings.salt_fingerprint and config.global_settings.salt:
+        config.global_settings.salt_fingerprint = config.global_settings.compute_fingerprint()
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     yaml_content = dump_config_to_yaml(config)
