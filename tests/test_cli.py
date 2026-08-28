@@ -190,6 +190,32 @@ def test_cli_apply_jsonl(tmp_path: Path):
     assert "user1@example.com" not in content
 
 
+def test_cli_apply_workers_warning_for_csv_and_jsonl(tmp_path: Path, csv_file: Path):
+    config_file = tmp_path / "cloakdb.yaml"
+    runner.invoke(app, ["init", "-o", str(config_file)])
+
+    # Test CSV with workers > 1
+    out_csv = tmp_path / "out_csv.csv"
+    res_csv = runner.invoke(
+        app,
+        ["apply", "-c", str(config_file), "-i", str(csv_file), "-o", str(out_csv), "--workers", "4"],
+    )
+    assert res_csv.exit_code == 0
+    assert "Parallel processing (--workers 4) is not yet supported for CSV" in res_csv.output
+
+    # Test JSONL with workers > 1
+    jsonl_in = tmp_path / "users.jsonl"
+    jsonl_in.write_text('{"id": 1, "email": "test@example.com"}\n', encoding="utf-8")
+    out_jsonl = tmp_path / "out_jsonl.jsonl"
+    res_jsonl = runner.invoke(
+        app,
+        ["apply", "-c", str(config_file), "-i", str(jsonl_in), "-o", str(out_jsonl), "--workers", "4"],
+    )
+    assert res_jsonl.exit_code == 0
+    assert "Parallel processing (--workers 4) is not yet supported for JSONL" in res_jsonl.output
+
+
+
 def test_cli_apply_missing_file_errors(tmp_path: Path):
     config_file = tmp_path / "cloakdb.yaml"
     runner.invoke(app, ["init", "-o", str(config_file)])

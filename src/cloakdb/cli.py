@@ -397,9 +397,17 @@ def apply(
         # Select stream parser based on extension and worker count
         parser: BaseStreamParser
         if in_path.suffix.lower() == ".csv":
+            if workers > 1:
+                console.print(
+                    f"[bold yellow]Warning:[/bold yellow] Parallel processing (--workers {workers}) is not yet supported for CSV files. Falling back to single-worker mode."
+                )
             first_table = list(config.tables.keys())[0] if config.tables else "default"
             parser = CSVStreamParser(table_name=first_table)
         elif in_path.suffix.lower() == ".jsonl":
+            if workers > 1:
+                console.print(
+                    f"[bold yellow]Warning:[/bold yellow] Parallel processing (--workers {workers}) is not yet supported for JSONL files. Falling back to single-worker mode."
+                )
             first_table = list(config.tables.keys())[0] if config.tables else "default"
             parser = JSONLinesStreamParser(table_name=first_table)
         elif workers > 1:
