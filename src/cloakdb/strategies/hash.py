@@ -37,7 +37,7 @@ class DeterministicHashStrategy(MaskingStrategy):
         if value is None:
             return None
 
-        effective_salt = salt or context.salt or "cloakdb-salt"
+        effective_salt = salt or context.salt
         val_str = str(value).encode("utf-8")
         h = hmac.new(effective_salt.encode("utf-8"), val_str, hashlib.sha256).digest()
 
@@ -78,6 +78,6 @@ class DeterministicUUIDStrategy(MaskingStrategy):
 
         import uuid
 
-        effective_salt = salt or context.salt or "cloakdb-salt"
+        effective_salt = salt or context.salt
         val_str = f"{effective_salt}:{value}"
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, val_str))

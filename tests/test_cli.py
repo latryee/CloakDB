@@ -57,6 +57,31 @@ def test_cli_init_and_scan(tmp_path: Path, postgres_dump_file: Path):
     assert "users" in res_scan.stdout
 
 
+def test_cli_init_generates_random_salts(tmp_path: Path):
+    from cloakdb.config.loader import load_config
+    from cloakdb.scanner.generator import ConfigGenerator
+
+    config1_path = tmp_path / "c1.yaml"
+    config2_path = tmp_path / "c2.yaml"
+
+    res1 = runner.invoke(app, ["init", "-o", str(config1_path)])
+    res2 = runner.invoke(app, ["init", "-o", str(config2_path)])
+    assert res1.exit_code == 0 and res2.exit_code == 0
+
+    c1 = load_config(config1_path)
+    c2 = load_config(config2_path)
+    assert len(c1.global_settings.salt) >= 32
+    assert len(c2.global_settings.salt) >= 32
+    assert c1.global_settings.salt != c2.global_settings.salt
+
+    gen = ConfigGenerator()
+    gen_c1 = gen.generate_config_from_detections({})
+    gen_c2 = gen.generate_config_from_detections({})
+    assert len(gen_c1.global_settings.salt) >= 32
+    assert len(gen_c2.global_settings.salt) >= 32
+    assert gen_c1.global_settings.salt != gen_c2.global_settings.salt
+
+
 def test_cli_preview_sql(tmp_path: Path, postgres_dump_file: Path):
     config_file = tmp_path / "cloakdb.yaml"
     runner.invoke(app, ["init", "-o", str(config_file)])

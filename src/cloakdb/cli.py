@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -158,7 +159,7 @@ def init(
         version="1",
         global_settings=GlobalConfig(
             seed=42,
-            salt="cloakdb-secure-salt",
+            salt=secrets.token_hex(32),
             locale="en_US",
             batch_size=5000,
             cache_pseudonyms=True,

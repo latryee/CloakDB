@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ColumnRule(BaseModel):
@@ -88,7 +88,7 @@ class GlobalConfig(BaseModel):
         description="Global PRNG seed for reproducible synthetic data generation",
     )
     salt: str = Field(
-        default="cloakdb-default-salt-v1",
+        ...,
         description="HMAC secret salt for deterministic hashing",
     )
     locale: str = Field(
@@ -110,13 +110,23 @@ class GlobalConfig(BaseModel):
         description="Maximum entries to keep in consistency LRU cache",
     )
 
+    @field_validator("salt")
+    @classmethod
+    def validate_salt(cls, v: Any) -> str:
+        if not v or not isinstance(v, str) or not v.strip():
+            raise ValueError(
+                "Global salt is not set. Populate `global.salt` with a random value of at "
+                "least 32 chars, e.g. `python -c 'import secrets; print(secrets.token_hex(32))'`."
+            )
+        return v
+
 
 class CloakConfig(BaseModel):
     """Root configuration object for CloakDB."""
 
     version: str = Field(default="1", description="Configuration schema version")
     global_settings: GlobalConfig = Field(
-        default_factory=GlobalConfig,
+        ...,
         alias="global",
         description="Global engine parameters",
     )
@@ -133,3 +143,22 @@ class CloakConfig(BaseModel):
         populate_by_name=True,
         extra="ignore",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_global_salt_present(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            g = data.get("global") if "global" in data else data.get("global_settings")
+            if g is None:
+                raise ValueError(
+                    "Global salt is not set. Populate `global.salt` with a random value of at "
+                    "least 32 chars, e.g. `python -c 'import secrets; print(secrets.token_hex(32))'`."
+                )
+            if isinstance(g, dict):
+                s = g.get("salt")
+                if not s or not isinstance(s, str) or not s.strip():
+                    raise ValueError(
+                        "Global salt is not set. Populate `global.salt` with a random value of at "
+                        "least 32 chars, e.g. `python -c 'import secrets; print(secrets.token_hex(32))'`."
+                    )
+        return data

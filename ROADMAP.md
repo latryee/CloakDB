@@ -8,6 +8,7 @@ This document outlines the planned future direction and engineering priorities f
 - [x] **Multi-Core Chunk Streaming (`ParallelStreamParser`)**: Bounded-queue parallel streaming with `--workers N`.
 - [x] **Extended SQL Dialects**: MS SQL Server (T-SQL bracketed identifiers, `N'...'` unicode literals, `IDENTITY_INSERT`, `GO`) and Oracle SQL (`REM`, `PROMPT`, quoted identifiers).
 - [x] **Safe AST Expression Evaluator**: Elimination of arbitrary code execution vectors in conditional masking.
+- [x] **Zero-Hardcoded Secrets & Dynamic Salt Generation**: Complete elimination of static fallback salts and enforced cryptographically secure random salt initialization.
 - [x] **Golden Integration Fixture Suite**: End-to-end multi-table relational tests.
 
 ---

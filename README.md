@@ -214,7 +214,7 @@ version: "1"
 # Global runtime options
 global:
   seed: 42                                # PRNG seed for reproducible synthetic generation
-  salt: "${SECRET_SALT:cloakdb-salt}"     # Secret salt for keyed HMAC hashing
+  salt: "${SECRET_SALT}"                  # Secret salt for keyed HMAC hashing (min 32 random chars)
   locale: "en_US"                         # Faker locale (en_US, tr_TR, de_DE, etc.)
   batch_size: 5000                        # Chunk size for streaming batch operations
   cache_pseudonyms: true                  # Cache pseudonyms for O(1) performance

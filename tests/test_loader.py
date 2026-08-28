@@ -10,7 +10,7 @@ from cloakdb.config.loader import (
     load_config,
     save_config,
 )
-from cloakdb.config.models import CloakConfig, ColumnRule, TableRule
+from cloakdb.config.models import CloakConfig, ColumnRule, GlobalConfig, TableRule
 
 
 def test_env_var_interpolation():
@@ -49,9 +49,40 @@ def test_load_config_validation_error(tmp_path: Path):
         load_config(invalid_config)
 
 
+def test_load_config_missing_salt_raises_error(tmp_path: Path):
+    config_file = tmp_path / "no_salt.yaml"
+    config_file.write_text(
+        "version: '1'\ntables:\n  users:\n    columns:\n      email:\n        strategy: faker\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Global salt is not set"):
+        load_config(config_file)
+
+
+def test_load_config_empty_salt_raises_error(tmp_path: Path):
+    config_file = tmp_path / "empty_salt.yaml"
+    config_file.write_text(
+        "version: '1'\nglobal:\n  salt: '   '\ntables:\n  users:\n    columns:\n      email:\n        strategy: faker\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Global salt is not set"):
+        load_config(config_file)
+
+
+def test_load_config_valid_salt_succeeds(tmp_path: Path):
+    config_file = tmp_path / "valid_salt.yaml"
+    config_file.write_text(
+        "version: '1'\nglobal:\n  salt: 'abcdef1234567890abcdef1234567890'\ntables:\n  users:\n    columns:\n      email:\n        strategy: faker\n",
+        encoding="utf-8",
+    )
+    loaded = load_config(config_file)
+    assert loaded.global_settings.salt == "abcdef1234567890abcdef1234567890"
+
+
 def test_save_and_load_config_roundtrip(tmp_path: Path):
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="roundtrip-salt-12345678901234567890"),
         tables={
             "users": TableRule(
                 columns={"email": ColumnRule(strategy="faker", params={"provider": "email"})}
@@ -64,6 +95,7 @@ def test_save_and_load_config_roundtrip(tmp_path: Path):
     assert out_file.exists()
 
     loaded = load_config(out_file)
+    assert loaded.global_settings.salt == "roundtrip-salt-12345678901234567890"
     assert "users" in loaded.tables
     assert "email" in loaded.tables["users"].columns
     assert loaded.tables["users"].columns["email"].strategy == "faker"

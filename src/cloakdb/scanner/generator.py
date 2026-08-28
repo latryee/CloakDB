@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -162,6 +163,9 @@ class ConfigGenerator:
 
         return CloakConfig(
             version="1",
-            global_settings=GlobalConfig(locale=locale),
+            global_settings=GlobalConfig(
+                salt=secrets.token_hex(32),
+                locale=locale,
+            ),
             tables=tables_dict,
         )

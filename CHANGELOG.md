@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+- **Enforced Secure Global Salt**: Completely eliminated all hardcoded and default salt literals across the codebase (`"cloakdb-salt"`, `"cloakdb-default-salt-v1"`, `"cloakdb-secure-salt"`). Configurations without an explicit, non-empty `global.salt` (minimum 32 characters recommended) are now rejected with a descriptive error. `cloakdb init` and `cloakdb scan -o` now generate cryptographically strong random salts dynamically via `secrets.token_hex(32)`.
+
 ### Added
 - **Nested JSON / JSONB Masking Engine (`json_mask`)**: Support for dot-notation (`profile.contact.email`), array wildcards (`orders[*].card`), and object wildcards (`metadata.*`) with native data type preservation.
 - **Multi-Core Chunk Streaming Parser (`ParallelStreamParser`)**: ProcessPoolExecutor-based bounded producer-consumer streaming via `cloakdb apply --workers N`.

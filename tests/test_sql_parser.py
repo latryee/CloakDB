@@ -3,7 +3,7 @@
 import io
 from pathlib import Path
 
-from cloakdb.config.models import CloakConfig, ColumnRule, TableRule
+from cloakdb.config.models import CloakConfig, ColumnRule, GlobalConfig, TableRule
 from cloakdb.core.engine import CloakEngine
 from cloakdb.parsers.csv_stream import CSVStreamParser
 from cloakdb.parsers.json_stream import JSONLinesStreamParser
@@ -18,6 +18,7 @@ from cloakdb.parsers.sql_dump import (
 def test_sql_dump_copy_and_insert_streaming(postgres_dump_file: Path):
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="sql-test-salt"),
         tables={
             "users": TableRule(
                 columns={
@@ -60,6 +61,7 @@ def test_sql_dump_copy_and_insert_streaming(postgres_dump_file: Path):
 def test_mysql_multi_insert_streaming(mysql_dump_file: Path):
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="sql-test-salt"),
         tables={
             "customers": TableRule(
                 columns={
@@ -122,6 +124,7 @@ def test_csv_stream_parser():
     csv_data = "id,name,email\n1,Alice,alice@example.com\n2,Bob,bob@example.com\n"
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="sql-test-salt"),
         tables={
             "users": TableRule(
                 columns={
@@ -149,6 +152,7 @@ def test_json_stream_parser():
     json_lines = '{"id": 1, "secret": "abc123xyz"}\n{"id": 2, "secret": "def456uvw"}\n'
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="sql-test-salt"),
         tables={"tokens": TableRule(columns={"secret": ColumnRule(strategy="nullify")})},
     )
     engine = CloakEngine(config)

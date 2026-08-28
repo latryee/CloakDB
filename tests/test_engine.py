@@ -1,6 +1,6 @@
 """Tests for CloakEngine, consistency groups, and referential integrity."""
 
-from cloakdb.config.models import CloakConfig, ColumnRule, ConsistencyGroup, TableRule
+from cloakdb.config.models import CloakConfig, ColumnRule, ConsistencyGroup, GlobalConfig, TableRule
 from cloakdb.core.engine import CloakEngine, evaluate_condition
 
 
@@ -8,6 +8,7 @@ def test_engine_referential_integrity():
     # users.id and orders.user_id belong to same consistency group
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="engine-test-salt"),
         consistency_groups=[
             ConsistencyGroup(
                 name="user_ids",
@@ -53,6 +54,7 @@ def test_engine_referential_integrity():
 def test_engine_conditional_masking():
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="engine-test-salt"),
         tables={
             "employees": TableRule(
                 columns={
@@ -98,6 +100,7 @@ def test_evaluate_condition_ast():
 def test_engine_truncate_and_row_values():
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="engine-test-salt"),
         tables={
             "logs": TableRule(truncate=True),
             "users": TableRule(
@@ -129,6 +132,7 @@ def test_deterministic_hash_across_tables_without_consistency_group():
     """Test A: deterministic_hash produces the same pseudonym across tables without a ConsistencyGroup."""
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="engine-test-salt"),
         tables={
             "users": TableRule(
                 columns={
@@ -163,6 +167,7 @@ def test_deterministic_hash_different_column_names():
     """Test B: deterministic_hash produces the same pseudonym across different column names."""
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="engine-test-salt"),
         tables={
             "users": TableRule(
                 columns={
@@ -197,6 +202,7 @@ def test_faker_without_consistency_group_is_column_scoped():
     """Test C: Faker without a consistency group is table/column-scoped and does not accidentally match globally."""
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="engine-test-salt"),
         tables={
             "users": TableRule(
                 columns={
@@ -232,6 +238,7 @@ def test_faker_with_consistency_group_matches_across_tables_and_columns():
     """Test D: Faker with a consistency group produces the exact same pseudonym across tables and column names."""
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="engine-test-salt"),
         consistency_groups=[
             ConsistencyGroup(
                 name="user_email_group",
@@ -272,10 +279,11 @@ def test_consistency_group_after_cache_eviction():
     """Test E: Correctness does not depend on LRU cache retention; recomputing after eviction produces identical pseudonym."""
     config = CloakConfig(
         version="1",
-        global_settings={
-            "max_cache_size": 2,  # Very small cache to force eviction
-            "cache_pseudonyms": True,
-        },
+        global_settings=GlobalConfig(
+            salt="engine-test-salt",
+            max_cache_size=2,  # Very small cache to force eviction
+            cache_pseudonyms=True,
+        ),
         consistency_groups=[
             ConsistencyGroup(
                 name="user_email_group",

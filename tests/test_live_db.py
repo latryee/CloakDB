@@ -15,7 +15,7 @@ from sqlalchemy import (
     select,
 )
 
-from cloakdb.config.models import CloakConfig, ColumnRule, TableRule
+from cloakdb.config.models import CloakConfig, ColumnRule, GlobalConfig, TableRule
 from cloakdb.connectors.live_db import LiveDatabaseConnector
 from cloakdb.core.engine import CloakEngine
 
@@ -55,6 +55,7 @@ def test_live_db_masking(tmp_path: Path):
 
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="live-db-test-salt"),
         tables={
             "users": TableRule(
                 columns={
@@ -107,6 +108,7 @@ def test_live_db_no_pk_error(tmp_path: Path):
 
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="live-db-test-salt"),
         tables={
             "logs": TableRule(
                 columns={"message": ColumnRule(strategy="constant", params={"value_to_set": "X"})}

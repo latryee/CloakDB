@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import secrets
 import time
 import tracemalloc
 from typing import Any
 
-from cloakdb.config.models import CloakConfig, ColumnRule, TableRule
+from cloakdb.config.models import CloakConfig, ColumnRule, GlobalConfig, TableRule
 from cloakdb.core.engine import CloakEngine
 
 
@@ -17,6 +18,7 @@ def run_benchmark(
     """Runs high-throughput benchmark across diverse strategy workloads."""
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt=secrets.token_hex(32)),
         tables={
             "bench_users": TableRule(
                 columns={

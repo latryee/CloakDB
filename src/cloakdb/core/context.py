@@ -39,9 +39,9 @@ class TransformationContext:
     table_name: str
     column_name: str
     row_index: int
+    salt: str
     row_data: dict[str, Any] = field(default_factory=dict)
     seed: int | None = 42
-    salt: str = "cloakdb-salt"
     locale: str = "en_US"
     group_name: str | None = None
     stats: MaskingStats = field(default_factory=MaskingStats)

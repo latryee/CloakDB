@@ -11,7 +11,7 @@ global:
   seed: 42
 
   # Secret salt for keyed HMAC-SHA256 deterministic pseudo-identifiers
-  salt: "${CLOAK_SECRET_SALT:cloakdb-production-salt-v1}"
+  salt: "${CLOAK_SECRET_SALT}"
 
   # Faker locale (en_US, tr_TR, de_DE, fr_FR, es_ES, etc.)
   locale: "en_US"

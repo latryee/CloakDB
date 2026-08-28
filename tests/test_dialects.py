@@ -2,7 +2,7 @@
 
 import io
 
-from cloakdb.config.models import CloakConfig, ColumnRule, TableRule
+from cloakdb.config.models import CloakConfig, ColumnRule, GlobalConfig, TableRule
 from cloakdb.core.engine import CloakEngine
 from cloakdb.parsers.sql_dump import SQLDumpStreamParser
 
@@ -24,6 +24,7 @@ GO
 
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="dialect-test-salt"),
         tables={
             "Customers": TableRule(
                 columns={
@@ -67,6 +68,7 @@ COMMIT;
 
     config = CloakConfig(
         version="1",
+        global_settings=GlobalConfig(salt="dialect-test-salt"),
         tables={
             "EMPLOYEES": TableRule(
                 columns={
