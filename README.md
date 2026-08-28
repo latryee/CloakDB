@@ -2,7 +2,7 @@
 
 # CloakDB
 
-> Deterministic database & SQL dump anonymization CLI for safe staging and test data.
+Deterministic database & SQL dump anonymization CLI for safe staging and test data.
 
 Production data → CloakDB → Anonymized data
 
