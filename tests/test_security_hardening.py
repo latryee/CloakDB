@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from pathlib import Path
+
 from typer.testing import CliRunner
 
 from cloakdb.cli import app
@@ -71,7 +72,10 @@ def test_is_production_connection_heuristics():
     """Verify production database URL detection."""
     assert is_production_connection("postgresql://user:pass@prod-db.internal:5432/app") is True
     assert is_production_connection("postgresql://user:pass@localhost:5432/production_app") is True
-    assert is_production_connection("mysql://root:pass@live-master.aws.rds.amazonaws.com:3306/db") is True
+    assert (
+        is_production_connection("mysql://root:pass@live-master.aws.rds.amazonaws.com:3306/db")
+        is True
+    )
     assert is_production_connection("postgresql://user:pass@localhost:5432/test_db") is False
     assert is_production_connection("sqlite:///local_dev.db") is False
     assert is_production_connection("/path/to/dump.sql") is False

@@ -100,9 +100,8 @@ class CloakEngine:
         self.incremental_since = incremental_since
         self.incremental_column = incremental_column
         self.stats = MaskingStats()
-        cache_enabled = (
-            self.config.global_settings.cache_pseudonyms
-            and not getattr(self.config.global_settings, "stateless", False)
+        cache_enabled = self.config.global_settings.cache_pseudonyms and not getattr(
+            self.config.global_settings, "stateless", False
         )
         self.integrity_manager = ReferentialIntegrityManager(
             groups=config.consistency_groups,
@@ -176,7 +175,7 @@ class CloakEngine:
             salt = self.config.global_settings.salt
             masked_list: list[Any] = []
             for idx, orig_v in enumerate(raw_vals):
-                token = f"{group.name}:{raw_vals}:{idx}".encode("utf-8")
+                token = f"{group.name}:{raw_vals}:{idx}".encode()
                 h = hmac.new(salt.encode("utf-8"), token, hashlib.sha256).digest()
                 res_val: str | int
                 if isinstance(orig_v, int):
@@ -211,7 +210,9 @@ class CloakEngine:
 
         # Incremental masking check
         if self.incremental_since:
-            inc_col = self._normalize_name(self.incremental_column) if self.incremental_column else None
+            inc_col = (
+                self._normalize_name(self.incremental_column) if self.incremental_column else None
+            )
             matched_key = None
             if inc_col:
                 matched_key = norm_keys.get(inc_col)

@@ -83,9 +83,7 @@ class PIIDetector:
     # Regex patterns
     PATTERNS = {
         "email": re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"),
-        "phone": re.compile(
-            r"^\+?[0-9]{1,4}?[-.\s]?\(?[0-9]{1,4}?\)?(?:[-.\s]?[0-9]{1,5}){2,5}$"
-        ),
+        "phone": re.compile(r"^\+?[0-9]{1,4}?[-.\s]?\(?[0-9]{1,4}?\)?(?:[-.\s]?[0-9]{1,5}){2,5}$"),
         "credit_card": re.compile(
             r"^(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})$"
         ),
@@ -216,7 +214,11 @@ class PIIDetector:
         if not data_only:
             for pii_type, keywords in self.NAME_KEYWORDS.items():
                 for kw in keywords:
-                    if kw == norm_col or norm_col.endswith(f"_{kw}") or norm_col.startswith(f"{kw}_"):
+                    if (
+                        kw == norm_col
+                        or norm_col.endswith(f"_{kw}")
+                        or norm_col.startswith(f"{kw}_")
+                    ):
                         strategy, params = self._get_recommendation(pii_type)
                         return PIIDetectionResult(
                             column_name=column_name,
@@ -232,7 +234,9 @@ class PIIDetector:
 
         # Filter out already masked values (containing '*' or 'REDACTED' or '[MASKED]')
         unmasked_samples = [
-            v for v in non_null_samples if "*" not in v and "REDACTED" not in v.upper() and "[MASKED]" not in v.upper()
+            v
+            for v in non_null_samples
+            if "*" not in v and "REDACTED" not in v.upper() and "[MASKED]" not in v.upper()
         ]
         if not unmasked_samples:
             return None

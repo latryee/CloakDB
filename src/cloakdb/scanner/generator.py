@@ -93,7 +93,11 @@ class ConfigGenerator:
         return self._detect_from_samples(table_samples, data_only=data_only)
 
     def scan_csv(
-        self, file_path: str | Path, table_name: str = "data", max_rows: int = 100, data_only: bool = False
+        self,
+        file_path: str | Path,
+        table_name: str = "data",
+        max_rows: int = 100,
+        data_only: bool = False,
     ) -> dict[str, list[PIIDetectionResult]]:
         """Samples a CSV file and detects PII columns."""
         path = Path(file_path)
@@ -159,7 +163,6 @@ class ConfigGenerator:
             return []
 
         import re
-        from cloakdb.config.models import ConsistencyGroup
 
         groups: list[ConsistencyGroup] = []
         seen_pairs: set[str] = set()
@@ -168,7 +171,9 @@ class ConfigGenerator:
             r"ALTER\s+TABLE\s+(?:ONLY\s+)?([`\"\[]?\w+[`\"\]]?)\s+ADD\s+(?:CONSTRAINT\s+[`\"\[]?\w+[`\"\]]?\s+)?FOREIGN\s+KEY\s*\(([^)]+)\)\s*REFERENCES\s*([`\"\[]?\w+[`\"\]]?)\s*\(([^)]+)\)",
             re.IGNORECASE,
         )
-        create_table_start = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([`\"\[]?\w+[`\"\]]?)", re.IGNORECASE)
+        create_table_start = re.compile(
+            r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([`\"\[]?\w+[`\"\]]?)", re.IGNORECASE
+        )
         table_fk_pattern = re.compile(
             r"FOREIGN\s+KEY\s*\(([^)]+)\)\s*REFERENCES\s*([`\"\[]?\w+[`\"\]]?)\s*\(([^)]+)\)",
             re.IGNORECASE,
@@ -189,7 +194,9 @@ class ConfigGenerator:
                     src_cols = [_clean_identifier(c) for c in alter_match.group(2).split(",")]
                     dst_tbl = _clean_identifier(alter_match.group(3))
                     dst_cols = [_clean_identifier(c) for c in alter_match.group(4).split(",")]
-                    self._add_inferred_fk_group(groups, seen_pairs, src_tbl, src_cols, dst_tbl, dst_cols)
+                    self._add_inferred_fk_group(
+                        groups, seen_pairs, src_tbl, src_cols, dst_tbl, dst_cols
+                    )
                     continue
 
                 # 2. Track CREATE TABLE context
@@ -202,19 +209,36 @@ class ConfigGenerator:
                     if ";" in line and ")" in line:
                         table_fk_match = table_fk_pattern.search(line)
                         if table_fk_match:
-                            src_cols = [_clean_identifier(c) for c in table_fk_match.group(1).split(",")]
+                            src_cols = [
+                                _clean_identifier(c) for c in table_fk_match.group(1).split(",")
+                            ]
                             dst_tbl = _clean_identifier(table_fk_match.group(2))
-                            dst_cols = [_clean_identifier(c) for c in table_fk_match.group(3).split(",")]
-                            self._add_inferred_fk_group(groups, seen_pairs, current_create_table, src_cols, dst_tbl, dst_cols)
+                            dst_cols = [
+                                _clean_identifier(c) for c in table_fk_match.group(3).split(",")
+                            ]
+                            self._add_inferred_fk_group(
+                                groups,
+                                seen_pairs,
+                                current_create_table,
+                                src_cols,
+                                dst_tbl,
+                                dst_cols,
+                            )
                         current_create_table = None
                         continue
 
                     table_fk_match = table_fk_pattern.search(line)
                     if table_fk_match:
-                        src_cols = [_clean_identifier(c) for c in table_fk_match.group(1).split(",")]
+                        src_cols = [
+                            _clean_identifier(c) for c in table_fk_match.group(1).split(",")
+                        ]
                         dst_tbl = _clean_identifier(table_fk_match.group(2))
-                        dst_cols = [_clean_identifier(c) for c in table_fk_match.group(3).split(",")]
-                        self._add_inferred_fk_group(groups, seen_pairs, current_create_table, src_cols, dst_tbl, dst_cols)
+                        dst_cols = [
+                            _clean_identifier(c) for c in table_fk_match.group(3).split(",")
+                        ]
+                        self._add_inferred_fk_group(
+                            groups, seen_pairs, current_create_table, src_cols, dst_tbl, dst_cols
+                        )
                         continue
 
                     inline_match = inline_fk_pattern.search(line)
@@ -222,7 +246,9 @@ class ConfigGenerator:
                         col_name = _clean_identifier(inline_match.group(1))
                         dst_tbl = _clean_identifier(inline_match.group(2))
                         dst_col = _clean_identifier(inline_match.group(3))
-                        self._add_inferred_fk_group(groups, seen_pairs, current_create_table, [col_name], dst_tbl, [dst_col])
+                        self._add_inferred_fk_group(
+                            groups, seen_pairs, current_create_table, [col_name], dst_tbl, [dst_col]
+                        )
                         continue
 
         return groups
@@ -230,7 +256,6 @@ class ConfigGenerator:
     def infer_foreign_keys_live_db(self, connection_url: str) -> list[ConsistencyGroup]:
         """Introspects a live database to automatically extract Foreign Key relationships."""
         from sqlalchemy import inspect
-        from cloakdb.config.models import ConsistencyGroup
 
         connector = LiveDatabaseConnector(connection_url)
         inspector = inspect(connector.engine)
@@ -250,7 +275,9 @@ class ConfigGenerator:
                 if not dst_tbl or not src_cols or not dst_cols:
                     continue
 
-                self._add_inferred_fk_group(groups, seen_pairs, tbl_name, src_cols, dst_tbl, dst_cols)
+                self._add_inferred_fk_group(
+                    groups, seen_pairs, tbl_name, src_cols, dst_tbl, dst_cols
+                )
 
         return groups
 

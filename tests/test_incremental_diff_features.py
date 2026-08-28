@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
 from typer.testing import CliRunner
 
 from cloakdb.cli import app
@@ -23,7 +24,9 @@ def test_incremental_masking_mode():
         tables={
             "users": TableRule(
                 columns={
-                    "email": ColumnRule(strategy="constant", params={"value_to_set": "masked@test.com"})
+                    "email": ColumnRule(
+                        strategy="constant", params={"value_to_set": "masked@test.com"}
+                    )
                 }
             )
         },
@@ -55,7 +58,9 @@ def test_json_document_stream_parser(tmp_path: Path):
         tables={
             "users": TableRule(
                 columns={
-                    "full_name": ColumnRule(strategy="constant", params={"value_to_set": "Anonymous"})
+                    "full_name": ColumnRule(
+                        strategy="constant", params={"value_to_set": "Anonymous"}
+                    )
                 }
             )
         },
@@ -89,14 +94,18 @@ def test_cli_diff_command(tmp_path: Path):
     cfg2_path = tmp_path / "cfg2.yaml"
     data_path = tmp_path / "sample.csv"
 
-    data_path.write_text("id,name,email\n1,Alice,alice@example.com\n2,Bob,bob@example.com\n", encoding="utf-8")
+    data_path.write_text(
+        "id,name,email\n1,Alice,alice@example.com\n2,Bob,bob@example.com\n", encoding="utf-8"
+    )
 
     cfg1 = CloakConfig(
         version="1",
         global_settings=GlobalConfig(salt="0123456789abcdef0123456789abcdef"),
         tables={
             "default": TableRule(
-                columns={"name": ColumnRule(strategy="constant", params={"value_to_set": "MASKED_1"})}
+                columns={
+                    "name": ColumnRule(strategy="constant", params={"value_to_set": "MASKED_1"})
+                }
             )
         },
     )
@@ -105,7 +114,9 @@ def test_cli_diff_command(tmp_path: Path):
         global_settings=GlobalConfig(salt="0123456789abcdef0123456789abcdef"),
         tables={
             "default": TableRule(
-                columns={"name": ColumnRule(strategy="constant", params={"value_to_set": "MASKED_2"})}
+                columns={
+                    "name": ColumnRule(strategy="constant", params={"value_to_set": "MASKED_2"})
+                }
             )
         },
     )

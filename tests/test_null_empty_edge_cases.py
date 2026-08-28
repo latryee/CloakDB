@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+
 import pytest
 
 from cloakdb.core.context import TransformationContext
@@ -44,7 +45,9 @@ ALL_STRATEGY_NAMES = [
 
 
 @pytest.mark.parametrize("strat_name", ALL_STRATEGY_NAMES)
-def test_all_strategies_handle_null_gracefully(strat_name: str, dummy_context: TransformationContext):
+def test_all_strategies_handle_null_gracefully(
+    strat_name: str, dummy_context: TransformationContext
+):
     """Every strategy must return None or appropriate default when given None without crashing."""
     strategy = StrategyRegistry.get(strat_name)
 

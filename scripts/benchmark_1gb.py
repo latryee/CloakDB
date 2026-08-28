@@ -7,10 +7,7 @@ streaming throughput, processing time, rows/sec, MB/s, and memory consumption.
 from __future__ import annotations
 
 import argparse
-import io
-import os
 import secrets
-import sys
 import tempfile
 import time
 import tracemalloc
@@ -40,14 +37,15 @@ def generate_benchmark_sql_dump(
     domains = ["gmail.com", "yahoo.com", "corp.example.com", "techhub.io", "outlook.com"]
     cities = ["New York", "London", "Berlin", "Tokyo", "Paris", "Sydney", "Toronto"]
 
-    bytes_written = 0
     with file_path.open("w", encoding="utf-8", newline="\n") as f:
         # 1. DDL Header
         f.write("-- CloakDB Enterprise 1GB+ Streaming Benchmark Fixture\n")
         f.write("SET client_encoding = 'UTF8';\n\n")
 
         # 2. Table: users
-        f.write("CREATE TABLE users (id INT PRIMARY KEY, full_name VARCHAR(100), email VARCHAR(150), phone VARCHAR(30), salary NUMERIC(10, 2), ssn VARCHAR(20));\n")
+        f.write(
+            "CREATE TABLE users (id INT PRIMARY KEY, full_name VARCHAR(100), email VARCHAR(150), phone VARCHAR(30), salary NUMERIC(10, 2), ssn VARCHAR(20));\n"
+        )
         f.write("COPY users (id, full_name, email, phone, salary, ssn) FROM stdin;\n")
 
         user_count = max(1000, target_rows // 2)
@@ -65,8 +63,12 @@ def generate_benchmark_sql_dump(
         f.write("\\.\n\n")
 
         # 3. Table: orders (Relational child referencing users.id)
-        f.write("CREATE TABLE orders (order_id INT PRIMARY KEY, user_id INT, amount NUMERIC(10, 2), shipping_address VARCHAR(200), credit_card VARCHAR(30));\n")
-        f.write("COPY orders (order_id, user_id, amount, shipping_address, credit_card) FROM stdin;\n")
+        f.write(
+            "CREATE TABLE orders (order_id INT PRIMARY KEY, user_id INT, amount NUMERIC(10, 2), shipping_address VARCHAR(200), credit_card VARCHAR(30));\n"
+        )
+        f.write(
+            "COPY orders (order_id, user_id, amount, shipping_address, credit_card) FROM stdin;\n"
+        )
 
         order_count = target_rows - user_count
         for oid in range(1, order_count + 1):
@@ -113,7 +115,9 @@ def run_1gb_benchmark(
         actual_bytes = generate_benchmark_sql_dump(input_dump, target_rows=approx_rows)
         actual_mb = actual_bytes / (1024 * 1024)
         gen_duration = time.perf_counter() - gen_start
-        console.print(f"[bold green][+] Generated {actual_mb:.2f} MB SQL dump in {gen_duration:.2f}s[/bold green]\n")
+        console.print(
+            f"[bold green][+] Generated {actual_mb:.2f} MB SQL dump in {gen_duration:.2f}s[/bold green]\n"
+        )
 
         # Create benchmark masking configuration
         salt = secrets.token_hex(32)
@@ -135,19 +139,35 @@ def run_1gb_benchmark(
             tables={
                 "users": TableRule(
                     columns={
-                        "id": ColumnRule(strategy="deterministic_hash", params={"as_integer": True}, consistency_group="cg_users_orders"),
-                        "full_name": ColumnRule(strategy="faker", params={"provider": "name", "deterministic": True}),
-                        "email": ColumnRule(strategy="faker", params={"provider": "email", "preserve_domain": True}),
+                        "id": ColumnRule(
+                            strategy="deterministic_hash",
+                            params={"as_integer": True},
+                            consistency_group="cg_users_orders",
+                        ),
+                        "full_name": ColumnRule(
+                            strategy="faker", params={"provider": "name", "deterministic": True}
+                        ),
+                        "email": ColumnRule(
+                            strategy="faker", params={"provider": "email", "preserve_domain": True}
+                        ),
                         "phone": ColumnRule(strategy="faker", params={"provider": "phone_number"}),
                         "salary": ColumnRule(strategy="jitter", params={"percentage": 10.0}),
-                        "ssn": ColumnRule(strategy="pattern_mask", params={"keep_first": 0, "keep_last": 4}),
+                        "ssn": ColumnRule(
+                            strategy="pattern_mask", params={"keep_first": 0, "keep_last": 4}
+                        ),
                     }
                 ),
                 "orders": TableRule(
                     columns={
-                        "user_id": ColumnRule(strategy="deterministic_hash", params={"as_integer": True}, consistency_group="cg_users_orders"),
+                        "user_id": ColumnRule(
+                            strategy="deterministic_hash",
+                            params={"as_integer": True},
+                            consistency_group="cg_users_orders",
+                        ),
                         "amount": ColumnRule(strategy="jitter", params={"percentage": 5.0}),
-                        "shipping_address": ColumnRule(strategy="faker", params={"provider": "address"}),
+                        "shipping_address": ColumnRule(
+                            strategy="faker", params={"provider": "address"}
+                        ),
                         "credit_card": ColumnRule(strategy="credit_card_mask"),
                     }
                 ),
@@ -180,7 +200,9 @@ def run_1gb_benchmark(
         peak_mem_mb = peak_mem / (1024 * 1024)
 
         # Summary Table
-        table = Table(title="[bold green]Benchmark Performance Results[/bold green]", box=box.ROUNDED)
+        table = Table(
+            title="[bold green]Benchmark Performance Results[/bold green]", box=box.ROUNDED
+        )
         table.add_column("Metric", style="bold cyan")
         table.add_column("Value", style="bold yellow")
 
@@ -189,7 +211,9 @@ def run_1gb_benchmark(
         table.add_row("Cells Masked", f"{stats.cells_masked:,}")
         table.add_row("Total Masking Time", f"{duration:.2f} seconds")
         table.add_row("Throughput (MB/s)", f"[bold green]{mb_per_sec:.2f} MB/s[/bold green]")
-        table.add_row("Throughput (Rows/s)", f"[bold green]{rows_per_sec:,.0f} rows/sec[/bold green]")
+        table.add_row(
+            "Throughput (Rows/s)", f"[bold green]{rows_per_sec:,.0f} rows/sec[/bold green]"
+        )
         table.add_row("Peak Memory (Heap)", f"[bold white]{peak_mem_mb:.2f} MB[/bold white]")
         table.add_row("Worker Concurrency", f"{workers} worker(s)")
 
@@ -209,10 +233,18 @@ def run_1gb_benchmark(
 
 def main():
     parser = argparse.ArgumentParser(description="CloakDB 1GB+ End-to-End Streaming Benchmark")
-    parser.add_argument("--size-mb", type=int, default=50, help="Target benchmark dataset size in MB (default: 50)")
-    parser.add_argument("--workers", type=int, default=1, help="Parallel worker processes (default: 1)")
-    parser.add_argument("--chunk-lines", type=int, default=5000, help="Chunk batch size in lines (default: 5000)")
-    parser.add_argument("--sample-only", action="store_true", help="Run a quick 5 MB sample benchmark")
+    parser.add_argument(
+        "--size-mb", type=int, default=50, help="Target benchmark dataset size in MB (default: 50)"
+    )
+    parser.add_argument(
+        "--workers", type=int, default=1, help="Parallel worker processes (default: 1)"
+    )
+    parser.add_argument(
+        "--chunk-lines", type=int, default=5000, help="Chunk batch size in lines (default: 5000)"
+    )
+    parser.add_argument(
+        "--sample-only", action="store_true", help="Run a quick 5 MB sample benchmark"
+    )
 
     args = parser.parse_args()
     target_mb = 5 if args.sample_only else args.size_mb

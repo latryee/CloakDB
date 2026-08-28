@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from pathlib import Path
+
 from typer.testing import CliRunner
 
 from cloakdb.cli import app
@@ -126,7 +127,9 @@ def test_infer_fks_from_sql_dump(tmp_path: Path):
 
     # Generate config with infer_fks=True
     detections = generator.scan_sql_dump(dump_file)
-    cfg = generator.generate_config_from_detections(detections, target=str(dump_file), infer_fks=True)
+    cfg = generator.generate_config_from_detections(
+        detections, target=str(dump_file), infer_fks=True
+    )
 
     assert len(cfg.consistency_groups) >= 2
 

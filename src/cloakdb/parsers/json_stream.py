@@ -114,5 +114,3 @@ class JSONDocumentStreamParser(BaseStreamParser):
                 progress_callback(1, 0)
         else:
             output_stream.write(json.dumps(parsed, ensure_ascii=False) + "\n")
-
-

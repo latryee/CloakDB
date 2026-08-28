@@ -95,7 +95,11 @@ def _check_salt_fingerprint(
             "will be BROKEN because the salt has changed!"
         )
         err_console.print(
-            Panel(warning_msg, title="[bold yellow]INTEGRITY WARNING[/bold yellow]", border_style="yellow")
+            Panel(
+                warning_msg,
+                title="[bold yellow]INTEGRITY WARNING[/bold yellow]",
+                border_style="yellow",
+            )
         )
 
         if not ignore_salt_mismatch:
@@ -446,13 +450,17 @@ def apply(
         False, "--allow-insecure-salt", help="Allow execution even if a weak/default salt is used"
     ),
     confirm_production: bool = typer.Option(
-        False, "--confirm-production", help="Explicitly confirm applying in-place masking to production DB"
+        False,
+        "--confirm-production",
+        help="Explicitly confirm applying in-place masking to production DB",
     ),
     ignore_salt_mismatch: bool = typer.Option(
         False, "--ignore-salt-mismatch", help="Ignore salt fingerprint mismatch warning/error"
     ),
     update_salt_fingerprint: bool = typer.Option(
-        False, "--update-salt-fingerprint", help="Re-compute and update salt fingerprint in config file"
+        False,
+        "--update-salt-fingerprint",
+        help="Re-compute and update salt fingerprint in config file",
     ),
     stateless: bool = typer.Option(
         False, "--stateless", help="Run with O(1) stateless memory mode (no LRU cache)"
@@ -812,7 +820,7 @@ def diff(
     elif input_target.endswith(".csv"):
         import csv
 
-        with open(input_target, "r", encoding="utf-8", errors="replace") as f:
+        with open(input_target, encoding="utf-8", errors="replace") as f:
             reader = csv.DictReader(f)
             first_tbl = list(cfg1.tables.keys())[0] if cfg1.tables else "default"
             for row in list(reader)[:limit]:
@@ -820,7 +828,7 @@ def diff(
     elif input_target.endswith(".jsonl"):
         import json
 
-        with open(input_target, "r", encoding="utf-8", errors="replace") as f:
+        with open(input_target, encoding="utf-8", errors="replace") as f:
             first_tbl = list(cfg1.tables.keys())[0] if cfg1.tables else "default"
             for line in f:
                 if line.strip():
@@ -830,7 +838,7 @@ def diff(
     elif input_target.endswith(".json"):
         import json
 
-        with open(input_target, "r", encoding="utf-8", errors="replace") as f:
+        with open(input_target, encoding="utf-8", errors="replace") as f:
             data = json.load(f)
             first_tbl = list(cfg1.tables.keys())[0] if cfg1.tables else "default"
             if isinstance(data, list):
@@ -852,7 +860,9 @@ def diff(
         console.print("[bold yellow]No sample records found to compare.[/bold yellow]")
         return
 
-    table = Table(title="[bold green]Side-by-Side Masking Output Diff[/bold green]", box=box.ROUNDED)
+    table = Table(
+        title="[bold green]Side-by-Side Masking Output Diff[/bold green]", box=box.ROUNDED
+    )
     table.add_column("Table.Column", style="bold cyan")
     table.add_column("Original Value", style="bold white")
     table.add_column("Config A Output", style="bold yellow")

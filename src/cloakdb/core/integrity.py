@@ -79,7 +79,9 @@ class ReferentialIntegrityManager:
                     cols_list = tuple(
                         self._normalize_name(c) for c in cols_part[:-1].split(",") if c.strip()
                     )
-                    self._composite_groups_by_table.setdefault(tbl_name, []).append((cols_list, group.name))
+                    self._composite_groups_by_table.setdefault(tbl_name, []).append(
+                        (cols_list, group.name)
+                    )
                     self._column_to_group[f"{tbl_name}.({','.join(cols_list)})"] = group.name
                 else:
                     normalized = self._normalize_column_ref(ref_clean)

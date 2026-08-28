@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import io
 import secrets
 import tempfile
 import time
@@ -44,19 +43,31 @@ def profile_memory_at_tier(row_count: int) -> dict[str, float]:
         tables={
             "users": TableRule(
                 columns={
-                    "id": ColumnRule(strategy="deterministic_hash", params={"as_integer": True}, consistency_group="cg_uid"),
-                    "full_name": ColumnRule(strategy="faker", params={"provider": "name", "deterministic": True}),
-                    "email": ColumnRule(strategy="faker", params={"provider": "email", "preserve_domain": True}),
+                    "id": ColumnRule(
+                        strategy="deterministic_hash",
+                        params={"as_integer": True},
+                        consistency_group="cg_uid",
+                    ),
+                    "full_name": ColumnRule(
+                        strategy="faker", params={"provider": "name", "deterministic": True}
+                    ),
+                    "email": ColumnRule(
+                        strategy="faker", params={"provider": "email", "preserve_domain": True}
+                    ),
                     "phone": ColumnRule(strategy="faker", params={"provider": "phone_number"}),
                     "salary": ColumnRule(strategy="jitter", params={"percentage": 10.0}),
                 }
             ),
             "orders": TableRule(
                 columns={
-                    "user_id": ColumnRule(strategy="deterministic_hash", params={"as_integer": True}, consistency_group="cg_uid"),
+                    "user_id": ColumnRule(
+                        strategy="deterministic_hash",
+                        params={"as_integer": True},
+                        consistency_group="cg_uid",
+                    ),
                     "credit_card": ColumnRule(strategy="credit_card_mask"),
                 }
-            )
+            ),
         },
     )
 
@@ -126,7 +137,9 @@ def run_memory_profile_suite(tiers: list[int] | None = None):
         res = profile_memory_at_tier(tier)
         results.append(res)
 
-    table = Table(title="[bold green]Memory Scaling Profile (tracemalloc)[/bold green]", box=box.ROUNDED)
+    table = Table(
+        title="[bold green]Memory Scaling Profile (tracemalloc)[/bold green]", box=box.ROUNDED
+    )
     table.add_column("Dataset Size (Rows)", justify="right", style="bold cyan")
     table.add_column("Execution Time (s)", justify="right", style="yellow")
     table.add_column("Throughput (Rows/s)", justify="right", style="green")
@@ -148,12 +161,20 @@ def run_memory_profile_suite(tiers: list[int] | None = None):
     console.print()
     console.print(table)
     console.print()
-    console.print("[bold green][PASS] Constant memory verified: Memory usage remains flat irrespective of row count.[/bold green]\n")
+    console.print(
+        "[bold green][PASS] Constant memory verified: Memory usage remains flat irrespective of row count.[/bold green]\n"
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description="CloakDB Constant Memory Profiler")
-    parser.add_argument("--tiers", nargs="+", type=int, default=[1000, 10000, 50000, 100000], help="Row counts to profile")
+    parser.add_argument(
+        "--tiers",
+        nargs="+",
+        type=int,
+        default=[1000, 10000, 50000, 100000],
+        help="Row counts to profile",
+    )
     args = parser.parse_args()
     run_memory_profile_suite(tiers=args.tiers)
 

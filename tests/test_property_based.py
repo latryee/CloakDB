@@ -16,7 +16,9 @@ from cloakdb.core.context import TransformationContext
 from cloakdb.strategies.registry import StrategyRegistry
 
 
-def make_ctx(salt: str = "0123456789abcdef0123456789abcdef", seed: int = 42) -> TransformationContext:
+def make_ctx(
+    salt: str = "0123456789abcdef0123456789abcdef", seed: int = 42
+) -> TransformationContext:
     return TransformationContext(
         table_name="users",
         column_name="test_col",
@@ -45,7 +47,10 @@ def test_property_deterministic_hash_string_invariants(val: str, salt: str):
     assert len(res1) > 0
 
 
-@given(val=st.integers(min_value=-1_000_000_000, max_value=1_000_000_000), salt=st.text(min_size=32, max_size=64))
+@given(
+    val=st.integers(min_value=-1_000_000_000, max_value=1_000_000_000),
+    salt=st.text(min_size=32, max_size=64),
+)
 @settings(max_examples=100)
 def test_property_deterministic_hash_integer_invariants(val: int, salt: str):
     """Deterministic integer hashing must return an integer within valid range deterministically."""
@@ -78,7 +83,11 @@ def test_property_deterministic_hash_collision_resistance(v1: str, v2: str):
     assert res1 != res2
 
 
-@given(val=st.text(min_size=0, max_size=100), keep_first=st.integers(min_value=0, max_value=5), keep_last=st.integers(min_value=0, max_value=5))
+@given(
+    val=st.text(min_size=0, max_size=100),
+    keep_first=st.integers(min_value=0, max_value=5),
+    keep_last=st.integers(min_value=0, max_value=5),
+)
 @settings(max_examples=100)
 def test_property_pattern_mask_length_preservation(val: str, keep_first: int, keep_last: int):
     """Pattern mask must preserve total string character count."""
