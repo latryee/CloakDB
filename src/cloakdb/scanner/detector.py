@@ -235,8 +235,12 @@ class PIIDetector:
                 sample_matches=non_null_samples[:3],
             )
 
-        # Check for Credit Card with Luhn algorithm
-        cc_matches = sum(1 for v in non_null_samples if _validate_luhn(v))
+        # Check for Credit Card: require BOTH regex match and Luhn algorithm validity
+        cc_matches = sum(
+            1
+            for v in non_null_samples
+            if self.PATTERNS["credit_card"].match(re.sub(r"[\s-]", "", v)) and _validate_luhn(v)
+        )
         if cc_matches / len(non_null_samples) >= 0.3:
             strategy, params = self._get_recommendation("credit_card")
             return PIIDetectionResult(

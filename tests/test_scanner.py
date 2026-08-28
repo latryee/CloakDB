@@ -63,6 +63,21 @@ def test_pii_detector_patterns_and_entropy():
     assert detector.detect_column("unknown_col", []) is None
 
 
+def test_credit_card_negative_detection_reduces_false_positives():
+    detector = PIIDetector()
+
+    # 1. 16-digit internal IDs / timestamps that fail Luhn should NOT be detected as credit card
+    non_cc_numbers = ["4532015012345678", "5123456789012345", "6011000000000001"]
+    res = detector.detect_column("transaction_ref_id", non_cc_numbers)
+    assert res is None or res.pii_type != "credit_card"
+
+    # 2. 16-digit sequential IDs with non-card prefixes
+    non_card_prefix = ["8912345678901234", "9876543210987654"]
+    res_prefix = detector.detect_column("internal_order_id", non_card_prefix)
+    assert res_prefix is None or res_prefix.pii_type != "credit_card"
+
+
+
 def test_scanner_sql_dump(postgres_dump_file: Path):
     generator = ConfigGenerator()
     detections = generator.scan_sql_dump(postgres_dump_file)
