@@ -26,6 +26,7 @@ from cloakdb.scanner.generator import ConfigGenerator
 from cloakdb.strategies.registry import StrategyRegistry
 from cloakdb.utils.benchmark import run_benchmark
 from cloakdb.utils.logger import console, err_console
+from cloakdb.utils.security import redact_connection_url
 
 app = typer.Typer(
     name="cloakdb",
@@ -75,7 +76,7 @@ def scan(
 ) -> None:
     """Scan a SQL dump, CSV file, or live database to auto-detect PII and generate rules."""
     generator = ConfigGenerator()
-    console.print(f"[bold cyan]Scanning target:[/bold cyan] {target}")
+    console.print(f"[bold cyan]Scanning target:[/bold cyan] {redact_connection_url(target)}")
 
     with Progress(
         SpinnerColumn("line"),
@@ -340,7 +341,7 @@ def apply(
         Panel(
             f"[bold white]CloakDB Masking Engine v{__version__}[/bold white]\n"
             f"[cyan]Config:[/cyan] {config_file}\n"
-            f"[cyan]Input:[/cyan] {input_target}\n"
+            f"[cyan]Input:[/cyan] {redact_connection_url(input_target)}\n"
             f"[cyan]Output:[/cyan] {output_target or '[Live In-Place]'}\n"
             f"[cyan]Configured Tables:[/cyan] {len(config.tables)}\n"
             f"[cyan]Workers:[/cyan] {workers}",
@@ -381,7 +382,7 @@ def apply(
         in_path = Path(input_target)
         if not in_path.exists():
             err_console.print(
-                f"[bold red]Error:[/bold red] Input file '{input_target}' does not exist."
+                f"[bold red]Error:[/bold red] Input file '{redact_connection_url(input_target)}' does not exist."
             )
             raise typer.Exit(1)
 

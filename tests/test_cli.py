@@ -284,3 +284,21 @@ def test_cli_live_db_workflows(tmp_path: Path):
         rows = list(conn.execute(select(users_tbl)))
         assert len(rows) == 2
         assert rows[0].email != "test1@domain.com"
+
+
+def test_cli_redacts_credentials_in_logs(tmp_path: Path):
+    fake_url = "postgresql://myuser:super_secret_password_123@db.prod.internal:5432/app"
+    config_file = tmp_path / "cloakdb.yaml"
+    runner.invoke(app, ["init", "-o", str(config_file)])
+
+    # scan with fake url
+    res_scan = runner.invoke(app, ["scan", fake_url])
+    assert "super_secret_password_123" not in res_scan.stdout
+    assert "super_secret_password_123" not in res_scan.output
+    assert "postgresql://myuser:***@db.prod.internal:5432/app" in res_scan.output
+
+    # apply with fake url
+    res_apply = runner.invoke(app, ["apply", "-c", str(config_file), "-i", fake_url, "--dry-run"])
+    assert "super_secret_password_123" not in res_apply.stdout
+    assert "super_secret_password_123" not in res_apply.output
+    assert "postgresql://myuser:***@db.prod.internal:5432/app" in res_apply.output
