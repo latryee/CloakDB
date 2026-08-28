@@ -37,11 +37,14 @@ class DifferentialPrivacyStrategy(MaskingStrategy):
         sensitivity: float = 1.0,
         mechanism: str = "laplace",
         delta: float = 1e-5,
+        clip_min: float | None = None,
+        clip_max: float | None = None,
         min_val: float | None = None,
         max_val: float | None = None,
         decimals: int | None = None,
         as_integer: bool = False,
         deterministic: bool = True,
+        track_budget: bool = True,
         **kwargs: Any,
     ) -> Any:
         if value is None:
@@ -57,6 +60,12 @@ class DifferentialPrivacyStrategy(MaskingStrategy):
 
         if sensitivity <= 0:
             raise ValueError(f"Query sensitivity must be > 0, got {sensitivity}")
+
+        # Input sensitivity clamping (pre-noise bounding)
+        if clip_min is not None:
+            val_num = max(clip_min, val_num)
+        if clip_max is not None:
+            val_num = min(clip_max, val_num)
 
         # Deterministic or Stochastic PRNG
         if deterministic:
@@ -76,6 +85,8 @@ class DifferentialPrivacyStrategy(MaskingStrategy):
             # sigma = sqrt(2 * ln(1.25 / delta)) * sensitivity / epsilon
             sigma = (math.sqrt(2.0 * math.log(1.25 / delta)) * sensitivity) / epsilon
             noise = rng.gauss(0.0, sigma)
+            if track_budget and hasattr(context, "stats") and context.stats is not None:
+                context.stats.record_privacy_budget(epsilon=epsilon, delta=delta)
         else:
             # Laplace mechanism: b = sensitivity / epsilon
             # Generate Laplace noise via inverse CDF: x = -b * sign(u) * ln(1 - 2|u|) where u in (-0.5, 0.5)
@@ -86,14 +97,18 @@ class DifferentialPrivacyStrategy(MaskingStrategy):
             else:
                 sign = 1.0 if u > 0 else -1.0
                 noise = -scale * sign * math.log(1.0 - 2.0 * abs(u))
+            if track_budget and hasattr(context, "stats") and context.stats is not None:
+                context.stats.record_privacy_budget(epsilon=epsilon, delta=0.0)
 
         perturbed = val_num + noise
 
-        # Optional bounds clamping
-        if min_val is not None:
-            perturbed = max(min_val, perturbed)
-        if max_val is not None:
-            perturbed = min(max_val, perturbed)
+        # Post-noise bounds clamping
+        effective_min = clip_min if clip_min is not None else min_val
+        effective_max = clip_max if clip_max is not None else max_val
+        if effective_min is not None:
+            perturbed = max(effective_min, perturbed)
+        if effective_max is not None:
+            perturbed = min(effective_max, perturbed)
 
         # Type and precision formatting
         if as_integer or (isinstance(value, int) and decimals is None):

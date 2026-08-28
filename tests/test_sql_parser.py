@@ -319,3 +319,75 @@ def test_json_stream_parser_malformed_line_error():
     assert "line 2" in error_msg
     assert "Malformed JSON on line 2" in error_msg
     assert "{id: 2" in error_msg
+
+
+def test_postgres_copy_csv_mode_streaming():
+    config = CloakConfig(
+        version="1",
+        global_settings=GlobalConfig(salt="test-salt"),
+        tables={"users": TableRule(columns={"email": ColumnRule(strategy="nullify")})},
+    )
+    engine = CloakEngine(config)
+    parser = SQLDumpStreamParser()
+
+    sql_content = (
+        'COPY users (id, email, name) FROM stdin WITH (FORMAT csv, HEADER false);\n'
+        '1,"alice@example.com","Alice, Jr."\n'
+        '2,"bob@example.com","Bob"\n'
+        '\\.\n'
+    )
+    in_stream = io.StringIO(sql_content)
+    out_stream = io.StringIO()
+    parser.process_stream(in_stream, out_stream, engine)
+
+    output = out_stream.getvalue()
+    assert "alice@example.com" not in output
+    assert "Alice, Jr." in output
+    assert engine.stats.rows_processed == 2
+
+
+def test_postgres_dollar_quoted_strings_in_parser():
+    config = CloakConfig(
+        version="1",
+        global_settings=GlobalConfig(salt="test-salt"),
+        tables={"articles": TableRule(columns={"author": ColumnRule(strategy="constant", params={"value_to_set": "Anon"})})},
+    )
+    engine = CloakEngine(config)
+    parser = SQLDumpStreamParser()
+
+    sql_content = (
+        "INSERT INTO articles (id, author, body) VALUES "
+        "(1, 'John Doe', $$SELECT 'nested; semicolon', 123;$$);\n"
+    )
+    in_stream = io.StringIO(sql_content)
+    out_stream = io.StringIO()
+    parser.process_stream(in_stream, out_stream, engine)
+
+    output = out_stream.getvalue()
+    assert "John Doe" not in output
+    assert "Anon" in output
+    assert "nested; semicolon" in output
+    assert engine.stats.rows_processed == 1
+
+
+def test_mysql_on_duplicate_key_update_streaming():
+    config = CloakConfig(
+        version="1",
+        global_settings=GlobalConfig(salt="test-salt"),
+        tables={"users": TableRule(columns={"email": ColumnRule(strategy="nullify")})},
+    )
+    engine = CloakEngine(config)
+    parser = SQLDumpStreamParser()
+
+    sql_content = (
+        "INSERT INTO users (id, email) VALUES (1, 'user1@test.com'), (2, 'user2@test.com') "
+        "ON DUPLICATE KEY UPDATE email = VALUES(email);\n"
+    )
+    in_stream = io.StringIO(sql_content)
+    out_stream = io.StringIO()
+    parser.process_stream(in_stream, out_stream, engine)
+
+    output = out_stream.getvalue()
+    assert "user1@test.com" not in output
+    assert "ON DUPLICATE KEY UPDATE email = VALUES(email)" in output
+    assert engine.stats.rows_processed == 2

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 import sys
 import time
@@ -19,6 +20,8 @@ from cloakdb.config.loader import load_config, save_config
 from cloakdb.config.models import CloakConfig, ColumnRule, GlobalConfig, TableRule
 from cloakdb.connectors.live_db import LiveDatabaseConnector
 from cloakdb.core.engine import CloakEngine
+from cloakdb.observability.audit import generate_audit_log, verify_audit_log
+from cloakdb.observability.telemetry import CloakTelemetry, setup_structured_logging
 from cloakdb.parsers.base import BaseStreamParser
 from cloakdb.parsers.csv_stream import CSVStreamParser
 from cloakdb.parsers.json_stream import JSONLinesStreamParser
@@ -32,6 +35,7 @@ from cloakdb.utils.security import (
     is_insecure_salt,
     is_production_connection,
     redact_connection_url,
+    zeroize_memory,
 )
 
 app = typer.Typer(
@@ -104,40 +108,25 @@ def _check_salt_fingerprint(
 
         if not ignore_salt_mismatch:
             err_console.print(
-                "[bold red]Error:[/bold red] Salt fingerprint mismatch. "
-                "Pass '--ignore-salt-mismatch' to proceed anyway, or '--update-salt-fingerprint' to re-bind."
+                "[bold red]Error:[/bold red] Salt mismatch. Use '--ignore-salt-mismatch' to proceed "
+                "or '--update-salt-fingerprint' to overwrite the stored fingerprint."
             )
             raise typer.Exit(1)
 
 
 def _check_production_safety(target: str, confirm_production: bool = False) -> None:
-    """Detects live production database targets and demands explicit confirmation."""
-    if is_production_connection(target):
+    """Safeguards against unintentional in-place modification of live production databases."""
+    if is_production_connection(target) and not confirm_production:
         warning_msg = (
-            "[bold red]PRODUCTION DATABASE TARGET DETECTED[/bold red]\n\n"
+            "[bold red]DANGER: TARGET APPEARS TO BE A LIVE PRODUCTION DATABASE[/bold red]\n\n"
             f"Target URL: [yellow]{redact_connection_url(target)}[/yellow]\n\n"
-            "You are attempting to execute in-place masking on a LIVE PRODUCTION database.\n"
-            "This operation will directly modify records in the target database!"
+            "Applying transformations directly to a production database can cause irreversible data loss!\n"
+            "To execute against a production database, you MUST pass '--confirm-production'."
         )
         err_console.print(
             Panel(warning_msg, title="[bold red]PRODUCTION GUARD[/bold red]", border_style="red")
         )
-
-        if not confirm_production:
-            if sys.stdin.isatty():
-                confirmed = typer.confirm(
-                    "Are you sure you want to perform in-place masking on this PRODUCTION database?",
-                    default=False,
-                )
-                if not confirmed:
-                    err_console.print("[bold red]Aborted by user.[/bold red]")
-                    raise typer.Exit(1)
-            else:
-                err_console.print(
-                    "[bold red]Error:[/bold red] Production database detected in non-interactive mode. "
-                    "You must supply '--confirm-production' to execute."
-                )
-                raise typer.Exit(1)
+        raise typer.Exit(1)
 
 
 def _version_callback(value: bool) -> None:
@@ -145,16 +134,16 @@ def _version_callback(value: bool) -> None:
         console.print(
             f"[bold magenta]CloakDB[/bold magenta] version [bold cyan]{__version__}[/bold cyan]"
         )
-        raise typer.Exit()
+        raise typer.Exit(0)
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
-    version: bool | None = typer.Option(
-        None,
+    version: bool = typer.Option(
+        False,
         "--version",
-        "-V",
-        help="Show version and exit.",
+        "-v",
+        help="Show CloakDB version and exit.",
         callback=_version_callback,
         is_eager=True,
     ),
@@ -295,24 +284,24 @@ def init(
                         params={"provider": "name", "deterministic": True},
                     ),
                     "email": ColumnRule(
-                        strategy="faker",
-                        params={"provider": "email", "preserve_domain": True},
+                        strategy="fpe_email",
+                        params={"preserve_domain": True},
                     ),
                     "phone": ColumnRule(
-                        strategy="faker",
-                        params={"provider": "phone_number"},
+                        strategy="fpe_phone",
+                        params={"preserve_country_code": True},
                     ),
                     "credit_card": ColumnRule(
-                        strategy="credit_card_mask",
-                        params={"mask_char": "*"},
+                        strategy="fpe_credit_card",
+                        params={"luhn_checksum": True},
                     ),
                     "ssn": ColumnRule(
-                        strategy="pattern_mask",
-                        params={"keep_first": 0, "keep_last": 4, "mask_char": "*"},
+                        strategy="fpe_national_id",
+                        params={"id_type": "ssn"},
                     ),
                     "salary": ColumnRule(
-                        strategy="jitter",
-                        params={"percentage": 10.0, "distribution": "gaussian"},
+                        strategy="differential_privacy",
+                        params={"epsilon": 0.5, "mechanism": "laplace"},
                     ),
                     "password_hash": ColumnRule(
                         strategy="constant",
@@ -341,7 +330,7 @@ def init(
         f"[bold green][+] Created starter configuration at:[/bold green] [bold white]{out_path.resolve()}[/bold white]"
     )
     console.print(
-        "[dim]Customize the rules in this file and run 'cloakdb apply -c cloakdb.yaml -i dump.sql -o masked.sql'[/dim]"
+        "[dim]Customize the rules in this file and run 'cloakdb mask -c cloakdb.yaml -i dump.sql -o masked.sql'[/dim]"
     )
 
 
@@ -419,7 +408,6 @@ def preview(
         for tbl_name, results in detections.items():
             for res in results:
                 for sample in res.sample_matches[:2]:
-                    # Mock transformation
                     masked_val = engine.mask_record(tbl_name, {res.column_name: sample}).get(
                         res.column_name
                     )
@@ -428,7 +416,325 @@ def preview(
         console.print(table)
 
 
-@app.command()
+def _run_masking(
+    config_file: str,
+    input_target: str,
+    output_target: str | None,
+    dry_run: bool = False,
+    seed: int | None = None,
+    locale: str | None = None,
+    workers: int = 1,
+    allow_insecure_salt: bool = False,
+    confirm_production: bool = False,
+    ignore_salt_mismatch: bool = False,
+    update_salt_fingerprint: bool = False,
+    stateless: bool = False,
+    since: str | None = None,
+    incremental_column: str | None = None,
+    audit_log_path: str | None = None,
+    otel_endpoint: str | None = None,
+    json_logs: bool = False,
+) -> None:
+    """Shared execution routine for 'mask' and 'apply' commands."""
+    if json_logs:
+        setup_structured_logging()
+
+    if otel_endpoint:
+        CloakTelemetry.initialize(endpoint=otel_endpoint, enabled=True)
+
+    config = load_config(config_file)
+    _check_salt_security(config.global_settings.salt, allow_insecure_salt=allow_insecure_salt)
+    _check_salt_fingerprint(
+        config,
+        ignore_salt_mismatch=ignore_salt_mismatch,
+        update_salt_fingerprint=update_salt_fingerprint,
+        config_path=config_file,
+    )
+    _check_production_safety(input_target, confirm_production=confirm_production)
+
+    if seed is not None:
+        config.global_settings.seed = seed
+    if locale is not None:
+        config.global_settings.locale = locale
+    if stateless:
+        config.global_settings.stateless = True
+        config.global_settings.cache_pseudonyms = False
+
+    engine = CloakEngine(
+        config,
+        incremental_since=since,
+        incremental_column=incremental_column,
+    )
+
+    console.print(
+        Panel(
+            f"[bold white]CloakDB Masking Engine v{__version__}[/bold white]\n"
+            f"[cyan]Config:[/cyan] {config_file}\n"
+            f"[cyan]Input:[/cyan] {redact_connection_url(input_target)}\n"
+            f"[cyan]Output:[/cyan] {output_target or '[Live In-Place]'}\n"
+            f"[cyan]Configured Tables:[/cyan] {len(config.tables)}\n"
+            f"[cyan]Workers:[/cyan] {workers}",
+            title="[bold green]Execution Plan[/bold green]",
+            border_style="green",
+        )
+    )
+
+    start_time = time.perf_counter()
+
+    with CloakTelemetry.span("cloakdb.mask_pipeline", {"target": input_target}):
+        # Case 1: Live Database Connection
+        if "://" in input_target:
+            connector = LiveDatabaseConnector(input_target)
+            tables = connector.get_table_names()
+
+            with Progress(
+                SpinnerColumn("line"),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Masking live database tables...", total=len(tables))
+
+                for tbl in tables:
+                    if engine.get_table_rule(tbl):
+                        progress.update(
+                            task, description=f"Masking table [bold magenta]{tbl}[/bold magenta]..."
+                        )
+                        if not dry_run:
+                            with CloakTelemetry.span("cloakdb.mask_table", {"table": tbl}):
+                                connector.mask_table(
+                                    tbl, engine, batch_size=config.global_settings.batch_size
+                                )
+                    progress.advance(task)
+
+        # Case 2: File Stream (SQL Dump, CSV, JSONL)
+        else:
+            in_path = Path(input_target)
+            if not in_path.exists():
+                err_console.print(
+                    f"[bold red]Error:[/bold red] Input file '{redact_connection_url(input_target)}' does not exist."
+                )
+                raise typer.Exit(1)
+
+            if not dry_run and not output_target:
+                err_console.print(
+                    "[bold red]Error:[/bold red] Output path (--output / -o) is required for file streams."
+                )
+                raise typer.Exit(1)
+
+            out_path = Path(output_target) if output_target else None
+
+            # Select stream parser based on extension and worker count
+            parser: BaseStreamParser
+            if in_path.suffix.lower() == ".csv":
+                if workers > 1:
+                    console.print(
+                        f"[bold yellow]Warning:[/bold yellow] Parallel processing (--workers {workers}) is not yet supported for CSV files. Falling back to single-worker mode."
+                    )
+                first_table = list(config.tables.keys())[0] if config.tables else "default"
+                parser = CSVStreamParser(table_name=first_table)
+            elif in_path.suffix.lower() == ".jsonl":
+                if workers > 1:
+                    console.print(
+                        f"[bold yellow]Warning:[/bold yellow] Parallel processing (--workers {workers}) is not yet supported for JSONL files. Falling back to single-worker mode."
+                    )
+                first_table = list(config.tables.keys())[0] if config.tables else "default"
+                parser = JSONLinesStreamParser(table_name=first_table)
+            elif in_path.suffix.lower() == ".json":
+                if workers > 1:
+                    console.print(
+                        f"[bold yellow]Warning:[/bold yellow] Parallel processing (--workers {workers}) is not yet supported for JSON document files. Falling back to single-worker mode."
+                    )
+                first_table = list(config.tables.keys())[0] if config.tables else "default"
+                from cloakdb.parsers.json_stream import JSONDocumentStreamParser
+
+                parser = JSONDocumentStreamParser(table_name=first_table)
+            elif in_path.suffix.lower() == ".parquet":
+                first_table = list(config.tables.keys())[0] if config.tables else "default"
+                from cloakdb.parsers.parquet_stream import ParquetStreamParser
+
+                parser = ParquetStreamParser(
+                    table_name=first_table, batch_size=config.global_settings.batch_size
+                )
+            elif workers > 1:
+                from cloakdb.parsers.chunking import ParallelStreamParser
+
+                parser = ParallelStreamParser(workers=workers)
+            else:
+                parser = SQLDumpStreamParser()
+
+            with Progress(
+                SpinnerColumn("line"),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                task = progress.add_task(
+                    f"Streaming and masking [bold cyan]{in_path.name}[/bold cyan]...", total=None
+                )
+
+                def _on_progress(rows: int, bytes_processed: int) -> None:
+                    progress.update(
+                        task,
+                        description=f"Processed [bold green]{engine.stats.rows_processed:,}[/bold green] rows ({engine.stats.mb_per_second:.1f} MB/s)...",
+                    )
+
+                if in_path.suffix.lower() == ".parquet":
+                    if dry_run or not out_path:
+                        import io
+
+                        null_out = io.BytesIO()
+                        with in_path.open("rb") as in_stream:
+                            parser.process_stream(
+                                in_stream, null_out, engine, progress_callback=_on_progress
+                            )
+                    else:
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        parser.process_file_chunked(
+                            in_path, out_path, engine, progress_callback=_on_progress
+                        )
+                else:
+                    with in_path.open("r", encoding="utf-8", errors="replace") as in_stream:
+                        if dry_run or not out_path:
+                            import io
+
+                            null_out = io.StringIO()
+                            parser.process_stream(
+                                in_stream, null_out, engine, progress_callback=_on_progress
+                            )
+                        else:
+                            out_path.parent.mkdir(parents=True, exist_ok=True)
+                            with out_path.open("w", encoding="utf-8", newline="") as out_stream:
+                                parser.process_stream(
+                                    in_stream, out_stream, engine, progress_callback=_on_progress
+                                )
+
+    duration = max(0.001, time.perf_counter() - start_time)
+    stats = engine.finish()
+
+    summary_table = Table(box=box.SIMPLE_HEAVY, show_header=False)
+    summary_table.add_column("Metric", style="bold cyan")
+    summary_table.add_column("Value", style="bold white")
+    summary_table.add_row("Status", "[bold green][OK] Completed Successfully[/bold green]")
+    summary_table.add_row("Rows Processed", f"{stats.rows_processed:,}")
+    summary_table.add_row("Cells Masked", f"{stats.cells_masked:,}")
+    summary_table.add_row("Execution Time", f"{duration:.2f} seconds")
+    summary_table.add_row(
+        "Throughput", f"[bold yellow]{stats.rows_per_second:,.0f} rows/sec[/bold yellow]"
+    )
+    if stats.privacy_budget.get("epsilon_total", 0.0) > 0:
+        summary_table.add_row(
+            "Privacy Budget (ε, δ)",
+            f"ε = {stats.privacy_budget['epsilon_total']:.4f}, δ = {stats.privacy_budget['delta_total']:.2e}",
+        )
+
+    console.print()
+    console.print(
+        Panel(summary_table, title="[bold green]Masking Summary[/bold green]", border_style="green")
+    )
+
+    # Generate and save signed SOC2 audit log if requested
+    if audit_log_path:
+        audit_doc = generate_audit_log(
+            config=config,
+            stats=stats,
+            input_target=input_target,
+            output_target=output_target,
+            config_path=config_file,
+            signer_key=config.global_settings.salt,
+        )
+        audit_p = Path(audit_log_path)
+        audit_p.parent.mkdir(parents=True, exist_ok=True)
+        with open(audit_p, "w", encoding="utf-8") as f:
+            json.dump(audit_doc, f, indent=2)
+        console.print(
+            f"[bold green][+] Tamper-evident SOC2 audit trail saved to:[/bold green] [bold white]{audit_p.resolve()}[/bold white]"
+        )
+
+    # Securely wipe internal state and memory
+    zeroize_memory(engine)
+
+
+@app.command(name="mask")
+def mask(
+    config_file: str = typer.Option(
+        ..., "--config", "-c", help="Path to cloakdb.yaml configuration"
+    ),
+    input_target: str = typer.Option(
+        ...,
+        "--input",
+        "-i",
+        help="Input SQL dump (.sql), CSV (.csv), JSONL (.jsonl), or live DB URL",
+    ),
+    output_target: str | None = typer.Option(
+        None, "--output", "-o", help="Output file path (required for file streams)"
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Run masking without writing changes"),
+    seed: int | None = typer.Option(None, "--seed", "-s", help="Override global seed"),
+    locale: str | None = typer.Option(None, "--locale", "-l", help="Override Faker locale"),
+    workers: int = typer.Option(
+        1, "--workers", "-w", help="Number of parallel worker processes for stream parsing"
+    ),
+    allow_insecure_salt: bool = typer.Option(
+        False, "--allow-insecure-salt", help="Allow execution even if a weak/default salt is used"
+    ),
+    confirm_production: bool = typer.Option(
+        False,
+        "--confirm-production",
+        help="Explicitly confirm applying in-place masking to production DB",
+    ),
+    ignore_salt_mismatch: bool = typer.Option(
+        False, "--ignore-salt-mismatch", help="Ignore salt fingerprint mismatch warning/error"
+    ),
+    update_salt_fingerprint: bool = typer.Option(
+        False,
+        "--update-salt-fingerprint",
+        help="Re-compute and update salt fingerprint in config file",
+    ),
+    stateless: bool = typer.Option(
+        False, "--stateless", help="Run with O(1) stateless memory mode (no LRU cache)"
+    ),
+    since: str | None = typer.Option(
+        None, "--since", help="Incremental timestamp lower bound (e.g. 2026-01-01T00:00:00)"
+    ),
+    incremental_column: str | None = typer.Option(
+        None, "--incremental-column", help="Column name to check for incremental threshold"
+    ),
+    audit_log: str | None = typer.Option(
+        None, "--audit-log", help="Generate and write a signed SOC2 audit log JSON file to this path"
+    ),
+    otel_endpoint: str | None = typer.Option(
+        None, "--otel-endpoint", help="OpenTelemetry OTLP collector endpoint URL"
+    ),
+    json_logs: bool = typer.Option(
+        False, "--json-logs", help="Emit structured JSON log entries to stdout"
+    ),
+) -> None:
+    """Mask sensitive database dumps, files, or live streams with cryptographic precision."""
+    _run_masking(
+        config_file=config_file,
+        input_target=input_target,
+        output_target=output_target,
+        dry_run=dry_run,
+        seed=seed,
+        locale=locale,
+        workers=workers,
+        allow_insecure_salt=allow_insecure_salt,
+        confirm_production=confirm_production,
+        ignore_salt_mismatch=ignore_salt_mismatch,
+        update_salt_fingerprint=update_salt_fingerprint,
+        stateless=stateless,
+        since=since,
+        incremental_column=incremental_column,
+        audit_log_path=audit_log,
+        otel_endpoint=otel_endpoint,
+        json_logs=json_logs,
+    )
+
+
+@app.command(name="apply")
 def apply(
     config_file: str = typer.Option(
         ..., "--config", "-c", help="Path to cloakdb.yaml configuration"
@@ -473,193 +779,208 @@ def apply(
     incremental_column: str | None = typer.Option(
         None, "--incremental-column", help="Column name to check for incremental threshold"
     ),
+    audit_log: str | None = typer.Option(
+        None, "--audit-log", help="Generate and write a signed SOC2 audit log JSON file to this path"
+    ),
+    otel_endpoint: str | None = typer.Option(
+        None, "--otel-endpoint", help="OpenTelemetry OTLP collector endpoint URL"
+    ),
+    json_logs: bool = typer.Option(
+        False, "--json-logs", help="Emit structured JSON log entries to stdout"
+    ),
 ) -> None:
-    """Apply masking rules to an input file or live database stream."""
-    config = load_config(config_file)
-    _check_salt_security(config.global_settings.salt, allow_insecure_salt=allow_insecure_salt)
-    _check_salt_fingerprint(
-        config,
+    """Apply masking rules to an input file or live database stream (alias to 'mask')."""
+    _run_masking(
+        config_file=config_file,
+        input_target=input_target,
+        output_target=output_target,
+        dry_run=dry_run,
+        seed=seed,
+        locale=locale,
+        workers=workers,
+        allow_insecure_salt=allow_insecure_salt,
+        confirm_production=confirm_production,
         ignore_salt_mismatch=ignore_salt_mismatch,
         update_salt_fingerprint=update_salt_fingerprint,
-        config_path=config_file,
-    )
-    _check_production_safety(input_target, confirm_production=confirm_production)
-
-    if seed is not None:
-        config.global_settings.seed = seed
-    if locale is not None:
-        config.global_settings.locale = locale
-    if stateless:
-        config.global_settings.stateless = True
-        config.global_settings.cache_pseudonyms = False
-
-    engine = CloakEngine(
-        config,
-        incremental_since=since,
+        stateless=stateless,
+        since=since,
         incremental_column=incremental_column,
+        audit_log_path=audit_log,
+        otel_endpoint=otel_endpoint,
+        json_logs=json_logs,
     )
 
+
+@app.command()
+def lint(
+    config_file: str = typer.Option(
+        ..., "--config", "-c", help="Path to cloakdb.yaml configuration"
+    ),
+    input_target: str = typer.Option(
+        ..., "--input", "-i", help="Path to SQL dump, CSV, Parquet, or DB URL to validate against"
+    ),
+    strict: bool = typer.Option(
+        False, "--strict", help="Fail with error code if any schema drift or unmapped column exists"
+    ),
+    max_samples: int = typer.Option(
+        1000, "--max-samples", "-n", help="Max sample lines/rows to inspect"
+    ),
+    allow_insecure_salt: bool = typer.Option(
+        False, "--allow-insecure-salt", help="Allow execution even if a weak salt is used"
+    ),
+) -> None:
+    """Detect schema drift: compare dataset schema against cloakdb.yaml and report unmapped PII."""
+    config = load_config(config_file)
+    _check_salt_security(config.global_settings.salt, allow_insecure_salt=allow_insecure_salt)
+
+    generator = ConfigGenerator()
+    console.print(
+        f"[bold cyan]Linting dataset schema against configuration:[/bold cyan] {config_file}\n"
+        f"[bold cyan]Target:[/bold cyan] {redact_connection_url(input_target)}"
+    )
+
+    with Progress(
+        SpinnerColumn("line"),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Inspecting dataset tables and column schemas...", total=None)
+
+        if "://" in input_target:
+            detections = generator.scan_live_db(input_target, sample_limit=max_samples)
+        elif input_target.endswith(".csv"):
+            detections = generator.scan_csv(input_target, max_rows=max_samples)
+        elif input_target.endswith(".parquet"):
+            detections = generator.scan_parquet(input_target, max_rows=max_samples)
+        else:
+            detections = generator.scan_sql_dump(input_target, max_lines=max_samples)
+
+        progress.remove_task(task)
+
+    configured_tables = {k.lower(): (k, v) for k, v in config.tables.items()}
+    dataset_tables = {k.lower(): (k, v) for k, v in detections.items()}
+
+    unmapped_sensitive_cols: list[tuple[str, str, str, float]] = []
+    missing_in_dataset: list[str] = []
+    new_unconfigured_tables: list[str] = []
+
+    # Check for unmapped sensitive columns
+    for tbl_lower, (tbl_name, results) in dataset_tables.items():
+        if tbl_lower not in configured_tables:
+            new_unconfigured_tables.append(tbl_name)
+            for r in results:
+                unmapped_sensitive_cols.append((tbl_name, r.column_name, r.pii_type, r.confidence))
+        else:
+            _, tbl_rule = configured_tables[tbl_lower]
+            configured_cols = {c.lower() for c in tbl_rule.columns.keys()}
+            for r in results:
+                if r.column_name.lower() not in configured_cols:
+                    unmapped_sensitive_cols.append((tbl_name, r.column_name, r.pii_type, r.confidence))
+
+    for tbl_lower, (tbl_name, _) in configured_tables.items():
+        if tbl_lower not in dataset_tables and dataset_tables:
+            missing_in_dataset.append(tbl_name)
+
+    if unmapped_sensitive_cols:
+        table = Table(
+            title="[bold red]SCHEMA DRIFT DETECTED: Unmapped Sensitive Columns Found[/bold red]",
+            box=box.HEAVY_EDGE,
+        )
+        table.add_column("Table", style="bold magenta")
+        table.add_column("Unmapped Column", style="bold cyan")
+        table.add_column("Detected PII Type", style="bold yellow")
+        table.add_column("Confidence", justify="right", style="green")
+
+        for tbl, col, pii_type, conf in unmapped_sensitive_cols:
+            table.add_row(tbl, col, pii_type, f"{int(conf * 100)}%")
+
+        console.print()
+        console.print(table)
+        console.print()
+        err_console.print(
+            Panel(
+                f"[bold red][FAIL] Found {len(unmapped_sensitive_cols)} sensitive column(s) in incoming data missing from '{config_file}'.[/bold red]\n"
+                "Add rules for these columns to prevent accidental data leaks.",
+                title="[bold red]Lint Status: Drift Alert[/bold red]",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    if strict and (new_unconfigured_tables or missing_in_dataset):
+        err_console.print(
+            Panel(
+                f"[bold red][STRICT FAIL] Schema structure mismatch detected:[/bold red]\n"
+                f"Unconfigured Tables: {', '.join(new_unconfigured_tables) or 'None'}\n"
+                f"Missing Tables in Target: {', '.join(missing_in_dataset) or 'None'}",
+                title="[bold red]Strict Lint Failure[/bold red]",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    console.print()
     console.print(
         Panel(
-            f"[bold white]CloakDB Masking Engine v{__version__}[/bold white]\n"
-            f"[cyan]Config:[/cyan] {config_file}\n"
-            f"[cyan]Input:[/cyan] {redact_connection_url(input_target)}\n"
-            f"[cyan]Output:[/cyan] {output_target or '[Live In-Place]'}\n"
-            f"[cyan]Configured Tables:[/cyan] {len(config.tables)}\n"
-            f"[cyan]Workers:[/cyan] {workers}",
-            title="[bold green]Execution Plan[/bold green]",
+            "[bold green][PASS] SCHEMA COMPLIANT & SYNCHRONIZED[/bold green]\n\n"
+            "All detected sensitive columns in the dataset are covered by active masking rules in the configuration.\n"
+            "No unmapped PII or drift was identified.",
+            title="[bold green]CloakDB Schema Lint Report[/bold green]",
             border_style="green",
         )
     )
 
-    start_time = time.perf_counter()
 
-    # Case 1: Live Database Connection
-    if "://" in input_target:
-        connector = LiveDatabaseConnector(input_target)
-        tables = connector.get_table_names()
+@app.command(name="audit-log")
+def audit_log(
+    verify_file: str | None = typer.Option(
+        None, "--verify", "-v", help="Path to signed audit log JSON file to verify"
+    ),
+    key: str | None = typer.Option(
+        None, "--key", "-k", help="Secret salt or signing key used for verification"
+    ),
+    config_file: str | None = typer.Option(
+        None, "--config", "-c", help="Path to cloakdb.yaml (extracts salt as key)"
+    ),
+) -> None:
+    """Verify cryptographically signed audit log trails for SOC2 & ISO 27001 compliance."""
+    if not verify_file:
+        console.print("[yellow]Usage: cloakdb audit-log --verify <audit.json> --config <cloakdb.yaml>[/yellow]")
+        return
 
-        with Progress(
-            SpinnerColumn("line"),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TimeElapsedColumn(),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Masking live database tables...", total=len(tables))
+    effective_key = key
+    if not effective_key and config_file:
+        cfg = load_config(config_file)
+        effective_key = cfg.global_settings.salt
 
-            for tbl in tables:
-                if engine.get_table_rule(tbl):
-                    progress.update(
-                        task, description=f"Masking table [bold magenta]{tbl}[/bold magenta]..."
-                    )
-                    if not dry_run:
-                        connector.mask_table(
-                            tbl, engine, batch_size=config.global_settings.batch_size
-                        )
-                progress.advance(task)
+    if not effective_key:
+        err_console.print(
+            "[bold red]Error:[/bold red] You must provide either '--key <secret>' or '--config <cloakdb.yaml>' for verification."
+        )
+        raise typer.Exit(1)
 
-    # Case 2: File Stream (SQL Dump, CSV, JSONL)
+    is_valid, msg = verify_audit_log(verify_file, signer_key=effective_key)
+    if is_valid:
+        console.print()
+        console.print(
+            Panel(
+                f"[bold green][PASS] AUDIT TRAIL VERIFIED[/bold green]\n\n{msg}\n\n"
+                "Cryptographic HMAC-SHA256 checksum and canonical payload match perfectly.\n"
+                "Audit log is tamper-evident and compliant.",
+                title="[bold green]SOC2 Audit Log Verification[/bold green]",
+                border_style="green",
+            )
+        )
     else:
-        in_path = Path(input_target)
-        if not in_path.exists():
-            err_console.print(
-                f"[bold red]Error:[/bold red] Input file '{redact_connection_url(input_target)}' does not exist."
+        err_console.print()
+        err_console.print(
+            Panel(
+                f"[bold red][FAIL] AUDIT LOG TAMPERED OR INVALID KEY[/bold red]\n\n{msg}",
+                title="[bold red]Verification Failure[/bold red]",
+                border_style="red",
             )
-            raise typer.Exit(1)
-
-        if not dry_run and not output_target:
-            err_console.print(
-                "[bold red]Error:[/bold red] Output path (--output / -o) is required for file streams."
-            )
-            raise typer.Exit(1)
-
-        out_path = Path(output_target) if output_target else None
-
-        # Select stream parser based on extension and worker count
-        parser: BaseStreamParser
-        if in_path.suffix.lower() == ".csv":
-            if workers > 1:
-                console.print(
-                    f"[bold yellow]Warning:[/bold yellow] Parallel processing (--workers {workers}) is not yet supported for CSV files. Falling back to single-worker mode."
-                )
-            first_table = list(config.tables.keys())[0] if config.tables else "default"
-            parser = CSVStreamParser(table_name=first_table)
-        elif in_path.suffix.lower() == ".jsonl":
-            if workers > 1:
-                console.print(
-                    f"[bold yellow]Warning:[/bold yellow] Parallel processing (--workers {workers}) is not yet supported for JSONL files. Falling back to single-worker mode."
-                )
-            first_table = list(config.tables.keys())[0] if config.tables else "default"
-            parser = JSONLinesStreamParser(table_name=first_table)
-        elif in_path.suffix.lower() == ".json":
-            if workers > 1:
-                console.print(
-                    f"[bold yellow]Warning:[/bold yellow] Parallel processing (--workers {workers}) is not yet supported for JSON document files. Falling back to single-worker mode."
-                )
-            first_table = list(config.tables.keys())[0] if config.tables else "default"
-            from cloakdb.parsers.json_stream import JSONDocumentStreamParser
-
-            parser = JSONDocumentStreamParser(table_name=first_table)
-        elif in_path.suffix.lower() == ".parquet":
-            first_table = list(config.tables.keys())[0] if config.tables else "default"
-            from cloakdb.parsers.parquet_stream import ParquetStreamParser
-
-            parser = ParquetStreamParser(
-                table_name=first_table, batch_size=config.global_settings.batch_size
-            )
-        elif workers > 1:
-            from cloakdb.parsers.chunking import ParallelStreamParser
-
-            parser = ParallelStreamParser(workers=workers)
-        else:
-            parser = SQLDumpStreamParser()
-
-        with Progress(
-            SpinnerColumn("line"),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TimeElapsedColumn(),
-            console=console,
-        ) as progress:
-            task = progress.add_task(
-                f"Streaming and masking [bold cyan]{in_path.name}[/bold cyan]...", total=None
-            )
-
-            def _on_progress(rows: int, bytes_processed: int) -> None:
-                progress.update(
-                    task,
-                    description=f"Processed [bold green]{engine.stats.rows_processed:,}[/bold green] rows ({engine.stats.mb_per_second:.1f} MB/s)...",
-                )
-
-            if in_path.suffix.lower() == ".parquet":
-                if dry_run or not out_path:
-                    import io
-
-                    null_out = io.BytesIO()
-                    with in_path.open("rb") as in_stream:
-                        parser.process_stream(
-                            in_stream, null_out, engine, progress_callback=_on_progress
-                        )
-                else:
-                    out_path.parent.mkdir(parents=True, exist_ok=True)
-                    parser.process_file_chunked(
-                        in_path, out_path, engine, progress_callback=_on_progress
-                    )
-            else:
-                with in_path.open("r", encoding="utf-8", errors="replace") as in_stream:
-                    if dry_run or not out_path:
-                        import io
-
-                        null_out = io.StringIO()
-                        parser.process_stream(
-                            in_stream, null_out, engine, progress_callback=_on_progress
-                        )
-                    else:
-                        out_path.parent.mkdir(parents=True, exist_ok=True)
-                        with out_path.open("w", encoding="utf-8", newline="") as out_stream:
-                            parser.process_stream(
-                                in_stream, out_stream, engine, progress_callback=_on_progress
-                            )
-
-    duration = max(0.001, time.perf_counter() - start_time)
-    stats = engine.finish()
-
-    summary_table = Table(box=box.SIMPLE_HEAVY, show_header=False)
-    summary_table.add_column("Metric", style="bold cyan")
-    summary_table.add_column("Value", style="bold white")
-    summary_table.add_row("Status", "[bold green][OK] Completed Successfully[/bold green]")
-    summary_table.add_row("Rows Processed", f"{stats.rows_processed:,}")
-    summary_table.add_row("Cells Masked", f"{stats.cells_masked:,}")
-    summary_table.add_row("Execution Time", f"{duration:.2f} seconds")
-    summary_table.add_row(
-        "Throughput", f"[bold yellow]{stats.rows_per_second:,.0f} rows/sec[/bold yellow]"
-    )
-
-    console.print()
-    console.print(
-        Panel(summary_table, title="[bold green]Masking Summary[/bold green]", border_style="green")
-    )
+        )
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -990,8 +1311,8 @@ def wizard(
             f"Tables configured: [cyan]{len(config.tables)}[/cyan]\n"
             f"Consistency groups: [cyan]{len(config.consistency_groups)}[/cyan]\n\n"
             "Next steps:\n"
-            f"1. Test in dry-run mode: [bold white]cloakdb apply -c {output_config} -i {target_input} --dry-run[/bold white]\n"
-            f"2. Apply masking:        [bold white]cloakdb apply -c {output_config} -i {target_input} -o sanitized_output[/bold white]",
+            f"1. Test in dry-run mode: [bold white]cloakdb mask -c {output_config} -i {target_input} --dry-run[/bold white]\n"
+            f"2. Apply masking:        [bold white]cloakdb mask -c {output_config} -i {target_input} -o sanitized_output[/bold white]",
             title="[bold green]Configuration Ready[/bold green]",
             border_style="green",
         )

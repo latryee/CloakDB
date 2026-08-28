@@ -95,13 +95,14 @@ class ConfigGenerator:
     def scan_csv(
         self,
         file_path: str | Path,
-        table_name: str = "data",
+        table_name: str | None = None,
         max_rows: int = 100,
         data_only: bool = False,
     ) -> dict[str, list[PIIDetectionResult]]:
         """Samples a CSV file and detects PII columns."""
         path = Path(file_path)
-        table_samples: dict[str, dict[str, list[Any]]] = {table_name: {}}
+        effective_table_name = table_name or path.stem or "data"
+        table_samples: dict[str, dict[str, list[Any]]] = {effective_table_name: {}}
 
         with path.open("r", encoding="utf-8", errors="replace") as f:
             reader = csv.reader(f)
@@ -110,14 +111,14 @@ class ConfigGenerator:
                 return {}
 
             for col in header:
-                table_samples[table_name][col] = []
+                table_samples[effective_table_name][col] = []
 
             for row_no, row in enumerate(reader):
                 if row_no > max_rows:
                     break
                 for idx, cell in enumerate(row):
                     if idx < len(header):
-                        table_samples[table_name][header[idx]].append(cell)
+                        table_samples[effective_table_name][header[idx]].append(cell)
 
         return self._detect_from_samples(table_samples, data_only=data_only)
 

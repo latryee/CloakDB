@@ -15,8 +15,20 @@ class MaskingStats:
     rows_processed: int = 0
     cells_masked: int = 0
     bytes_processed: int = 0
+    privacy_budget: dict[str, float] = field(
+        default_factory=lambda: {"epsilon_total": 0.0, "delta_total": 0.0}
+    )
     start_time: float = field(default_factory=time.perf_counter)
     end_time: float | None = None
+
+    def record_privacy_budget(self, epsilon: float, delta: float = 0.0) -> None:
+        """Records consumed epsilon and delta privacy budget."""
+        self.privacy_budget["epsilon_total"] = round(
+            self.privacy_budget.get("epsilon_total", 0.0) + epsilon, 6
+        )
+        self.privacy_budget["delta_total"] = round(
+            self.privacy_budget.get("delta_total", 0.0) + delta, 9
+        )
 
     @property
     def elapsed_seconds(self) -> float:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -12,7 +14,7 @@ from cloakdb.parsers.base import BaseStreamParser
 
 # Regex patterns for SQL constructs
 _COPY_PATTERN = re.compile(
-    r"^COPY\s+(?:(?P<schema>[\w\"`\[\]]+)\.)?(?P<table>[\w\"`\[\]]+)\s*\((?P<columns>[^\)]+)\)\s+FROM\s+stdin;",
+    r"^COPY\s+(?:(?P<schema>[\w\"`\[\]]+)\.)?(?P<table>[\w\"`\[\]]+)\s*(?:\((?P<columns>[^\)]+)\))?\s+FROM\s+stdin(?P<options>[^;]*);",
     re.IGNORECASE,
 )
 
@@ -20,6 +22,8 @@ _INSERT_HEADER_PATTERN = re.compile(
     r"^INSERT\s+INTO\s+(?:(?P<schema>[\w\"`\[\]]+)\.)?(?P<table>[\w\"`\[\]]+)\s*(?:\((?P<columns>[^\)]+)\))?\s+VALUES\s*",
     re.IGNORECASE,
 )
+
+_DOLLAR_QUOTE_START_RE = re.compile(r"^\$([a-zA-Z_0-9]*)\$")
 
 
 def _clean_identifier(ident: str) -> str:
@@ -43,6 +47,13 @@ def _parse_sql_value(raw: str) -> Any:
     # Support T-SQL N'...' unicode string literal prefix
     if (raw.startswith("N'") or raw.startswith('N"')) and (raw.endswith("'") or raw.endswith('"')):
         raw = raw[1:]
+    # PostgreSQL dollar-quoted string support
+    if raw.startswith("$"):
+        dollar_match = _DOLLAR_QUOTE_START_RE.match(raw)
+        if dollar_match:
+            tag = dollar_match.group(0)
+            if raw.endswith(tag) and len(raw) >= 2 * len(tag):
+                return raw[len(tag) : -len(tag)]
     if (raw.startswith("'") and raw.endswith("'")) or (raw.startswith('"') and raw.endswith('"')):
         # String literal: unescape SQL escapes
         content = raw[1:-1]
@@ -65,17 +76,13 @@ def _parse_sql_value(raw: str) -> Any:
 
 @dataclass
 class InsertBlockState:
-    """Carries in-progress parsing and quote-tracking state across physical lines."""
+    """Carries in-progress parsing state across physical lines."""
 
     table_name: str
     column_names: list[str]
     truncate: bool
     buffer: str = ""
-    in_quote: bool = False
-    quote_char: str = ""
-    is_escaped: bool = False
-    paren_depth: int = 0
-    tuple_start: int | None = None
+    in_trailing_clause: bool = False
 
 
 def _format_sql_value(val: Any) -> str:
@@ -99,6 +106,7 @@ def _split_sql_values_row(values_clause: str) -> list[tuple[int, int, str]]:
     tokens: list[tuple[int, int, str]] = []
     in_quote = False
     quote_char = ""
+    dollar_tag: str | None = None
     is_escaped = False
     start_idx = 0
     i = 0
@@ -111,10 +119,25 @@ def _split_sql_values_row(values_clause: str) -> list[tuple[int, int, str]]:
             i += 1
             continue
 
+        if dollar_tag is not None:
+            if s[i : i + len(dollar_tag)] == dollar_tag:
+                i += len(dollar_tag)
+                dollar_tag = None
+                continue
+            i += 1
+            continue
+
         if char == "\\" and in_quote:
             is_escaped = True
             i += 1
             continue
+
+        if char == "$" and not in_quote:
+            d_match = _DOLLAR_QUOTE_START_RE.match(s[i:])
+            if d_match:
+                dollar_tag = d_match.group(0)
+                i += len(dollar_tag)
+                continue
 
         if char in ("'", '"'):
             if not in_quote:
@@ -126,6 +149,7 @@ def _split_sql_values_row(values_clause: str) -> list[tuple[int, int, str]]:
                     i += 2
                     continue
                 in_quote = False
+                quote_char = ""
             i += 1
             continue
 
@@ -176,6 +200,7 @@ def _split_multiple_tuples(rest_clause: str) -> list[tuple[int, int, str]]:
                     i += 2
                     continue
                 in_quote = False
+                quote_char = ""
             i += 1
             continue
 
@@ -209,6 +234,7 @@ class SQLDumpStreamParser(BaseStreamParser):
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> None:
         in_copy_mode = False
+        copy_is_csv = False
         copy_table = ""
         copy_columns: list[str] = []
         copy_truncate = False
@@ -235,44 +261,65 @@ class SQLDumpStreamParser(BaseStreamParser):
 
                 has_newline = line.endswith("\n")
                 raw_line = line[:-1] if has_newline else line
-                cells = raw_line.split("\t")
 
-                parsed_values: list[str | None] = []
-                for cell in cells:
-                    if cell == r"\N":
-                        parsed_values.append(None)
-                    else:
-                        unescaped = (
-                            cell.replace(r"\n", "\n")
-                            .replace(r"\r", "\r")
-                            .replace(r"\t", "\t")
-                            .replace(r"\\", "\\")
-                        )
-                        parsed_values.append(unescaped)
+                if copy_is_csv:
+                    # CSV mode in PostgreSQL COPY
+                    row_io = io.StringIO(raw_line)
+                    reader = csv.reader(row_io)
+                    cells = next(reader, [])
 
-                masked_values = engine.mask_row_values(
-                    table_name=copy_table,
-                    column_names=copy_columns,
-                    row_values=parsed_values,
-                    row_index=row_count,
-                )
+                    masked_values = engine.mask_row_values(
+                        table_name=copy_table,
+                        column_names=copy_columns if copy_columns else [f"col_{i}" for i in range(len(cells))],
+                        row_values=cells,
+                        row_index=row_count,
+                    )
 
-                formatted_cells = []
-                for val in masked_values:
-                    if val is None:
-                        formatted_cells.append(r"\N")
-                    else:
-                        s = (
-                            str(val)
-                            .replace("\\", "\\\\")
-                            .replace("\t", r"\t")
-                            .replace("\n", r"\n")
-                            .replace("\r", r"\r")
-                        )
-                        formatted_cells.append(s)
+                    out_io = io.StringIO()
+                    writer = csv.writer(out_io, lineterminator="")
+                    writer.writerow(masked_values)
+                    out_line = out_io.getvalue() + ("\n" if has_newline else "")
+                    output_stream.write(out_line)
+                else:
+                    # Standard tab-delimited text mode in PostgreSQL COPY
+                    cells = raw_line.split("\t")
+                    parsed_values: list[str | None] = []
+                    for cell in cells:
+                        if cell == r"\N":
+                            parsed_values.append(None)
+                        else:
+                            unescaped = (
+                                cell.replace(r"\n", "\n")
+                                .replace(r"\r", "\r")
+                                .replace(r"\t", "\t")
+                                .replace(r"\\", "\\")
+                            )
+                            parsed_values.append(unescaped)
 
-                out_line = "\t".join(formatted_cells) + ("\n" if has_newline else "")
-                output_stream.write(out_line)
+                    masked_values = engine.mask_row_values(
+                        table_name=copy_table,
+                        column_names=copy_columns if copy_columns else [f"col_{i}" for i in range(len(cells))],
+                        row_values=parsed_values,
+                        row_index=row_count,
+                    )
+
+                    formatted_cells = []
+                    for val in masked_values:
+                        if val is None:
+                            formatted_cells.append(r"\N")
+                        else:
+                            s = (
+                                str(val)
+                                .replace("\\", "\\\\")
+                                .replace("\t", r"\t")
+                                .replace("\n", r"\n")
+                                .replace("\r", r"\r")
+                            )
+                            formatted_cells.append(s)
+
+                    out_line = "\t".join(formatted_cells) + ("\n" if has_newline else "")
+                    output_stream.write(out_line)
+
                 row_count += 1
                 if progress_callback and row_count % 500 == 0:
                     progress_callback(500, bytes_count)
@@ -283,7 +330,9 @@ class SQLDumpStreamParser(BaseStreamParser):
             if copy_match:
                 copy_table = _clean_identifier(copy_match.group("table"))
                 cols_raw = copy_match.group("columns")
-                copy_columns = _parse_column_list(cols_raw)
+                options_raw = copy_match.group("options") or ""
+                copy_is_csv = "csv" in options_raw.lower()
+                copy_columns = _parse_column_list(cols_raw) if cols_raw else []
                 copy_truncate = engine.should_truncate_table(copy_table)
                 in_copy_mode = True
                 output_stream.write(line)
@@ -373,6 +422,7 @@ class SQLDumpStreamParser(BaseStreamParser):
 
         in_quote = False
         quote_char = ""
+        dollar_tag: str | None = None
         is_escaped = False
         paren_depth = 0
         tuple_start: int | None = None
@@ -385,10 +435,25 @@ class SQLDumpStreamParser(BaseStreamParser):
                 i += 1
                 continue
 
+            if dollar_tag is not None:
+                if s[i : i + len(dollar_tag)] == dollar_tag:
+                    i += len(dollar_tag)
+                    dollar_tag = None
+                    continue
+                i += 1
+                continue
+
             if char == "\\" and in_quote:
                 is_escaped = True
                 i += 1
                 continue
+
+            if char == "$" and not in_quote:
+                d_match = _DOLLAR_QUOTE_START_RE.match(s[i:])
+                if d_match:
+                    dollar_tag = d_match.group(0)
+                    i += len(dollar_tag)
+                    continue
 
             if char in ("'", '"'):
                 if not in_quote:
@@ -405,6 +470,16 @@ class SQLDumpStreamParser(BaseStreamParser):
                 continue
 
             if not in_quote:
+                if state.in_trailing_clause:
+                    # In trailing clause: do not parse parens as value tuples; search for ';'
+                    if char == ";":
+                        if not state.truncate:
+                            output_stream.write(s[last_flush_idx : i + 1])
+                        state.buffer = s[i + 1 :]
+                        return True, masked_rows
+                    i += 1
+                    continue
+
                 if char == "(":
                     if paren_depth == 0:
                         tuple_start = i
@@ -439,6 +514,24 @@ class SQLDumpStreamParser(BaseStreamParser):
                         masked_rows += 1
                         last_flush_idx = tup_end
                         tuple_start = None
+
+                        # Check whether next token continues VALUES (...) or starts trailing clause (ON DUPLICATE KEY / RETURNING / etc.)
+                        k = tup_end
+                        while k < n and s[k] in (" ", "\t", "\r", "\n"):
+                            k += 1
+                        if k < n:
+                            if s[k] == ",":
+                                # Continues with next tuple
+                                pass
+                            elif s[k] == ";":
+                                # Terminates
+                                if not state.truncate:
+                                    output_stream.write(s[last_flush_idx : k + 1])
+                                state.buffer = s[k + 1 :]
+                                return True, masked_rows
+                            else:
+                                # Trailing clause begins (e.g. ON DUPLICATE KEY UPDATE)
+                                state.in_trailing_clause = True
 
                 elif char == ";":
                     # Statement terminator found outside quotes

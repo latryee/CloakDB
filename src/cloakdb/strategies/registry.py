@@ -13,6 +13,33 @@ class StrategyRegistry:
 
     _strategies: dict[str, MaskingStrategy] = {}
     _aliases: dict[str, str] = {}
+    _plugins_loaded: bool = False
+
+    @classmethod
+    def load_plugins(cls) -> int:
+        """Discovers and registers third-party strategies via Python entry points ('cloakdb.strategies')."""
+        if cls._plugins_loaded:
+            return 0
+
+        cls._plugins_loaded = True
+        loaded_count = 0
+        try:
+            from importlib.metadata import entry_points
+
+            eps = entry_points(group="cloakdb.strategies")
+            for ep in eps:
+                try:
+                    plugin_cls = ep.load()
+                    if isinstance(plugin_cls, type) and issubclass(plugin_cls, MaskingStrategy):
+                        instance = plugin_cls()
+                        instance.name = ep.name
+                        cls._strategies[ep.name.lower().strip()] = instance
+                        loaded_count += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return loaded_count
 
     @classmethod
     def register(
@@ -37,6 +64,8 @@ class StrategyRegistry:
     @classmethod
     def get(cls, name: str) -> MaskingStrategy:
         """Retrieves a registered strategy by name or alias."""
+        if not cls._plugins_loaded:
+            cls.load_plugins()
         key = name.lower().strip()
         if key in cls._aliases:
             key = cls._aliases[key]
@@ -48,6 +77,8 @@ class StrategyRegistry:
     @classmethod
     def list_strategies(cls) -> list[dict[str, Any]]:
         """Returns metadata for all registered strategies."""
+        if not cls._plugins_loaded:
+            cls.load_plugins()
         results = []
         for name, strategy in sorted(cls._strategies.items()):
             aliases = [a for a, target in cls._aliases.items() if target == name]

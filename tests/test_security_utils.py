@@ -67,3 +67,41 @@ def test_redact_connection_url_with_url_encoded_characters():
         redacted4
         == "mssql+pyodbc://sa:***@10.0.0.5:1433/sales?driver=ODBC+Driver+17+for+SQL+Server"
     )
+
+
+def test_hkdf_derive_key_and_keyed_mac():
+    from cloakdb.utils.security import hkdf_derive_key, keyed_mac_hash
+
+    salt = "secret-salt-1234567890123456789012"
+    key1 = hkdf_derive_key(salt, info="users.email", length=32)
+    key2 = hkdf_derive_key(salt, info="users.email", length=32)
+    assert len(key1) == 32
+    assert key1 == key2
+
+    key_diff = hkdf_derive_key(salt, info="orders.id", length=32)
+    assert key_diff != key1
+
+    mac = keyed_mac_hash(key1, "sensitive payload")
+    assert isinstance(mac, str) and len(mac) == 64
+
+
+def test_zeroize_memory():
+    from cloakdb.utils.security import zeroize_memory
+
+    # Bytearray zeroization
+    b = bytearray(b"super_secret_key_material")
+    assert zeroize_memory(b) is True
+    assert all(byte == 0 for byte in b)
+
+    # Dict zeroization
+    d = {"key": bytearray(b"secret"), "val": 123}
+    assert zeroize_memory(d) is True
+    assert len(d) == 0
+
+    # List zeroization
+    lst = [1, 2, 3]
+    assert zeroize_memory(lst) is True
+    assert len(lst) == 0
+
+    # None target
+    assert zeroize_memory(None) is True

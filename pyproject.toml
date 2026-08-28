@@ -4,21 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloakdb"
-version = "0.1.0"
-description = "Deterministic database & SQL dump anonymization CLI"
+version = "1.0.0"
+description = "Deterministic database & SQL dump anonymization engine with FPE, Differential Privacy, and OTel observability"
 readme = "README.md"
 authors = [
     { name = "latryee", email = "latryee@users.noreply.github.com" }
 ]
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -34,6 +34,10 @@ keywords = [
     "masking",
     "pii",
     "gdpr",
+    "fpe",
+    "differential-privacy",
+    "opentelemetry",
+    "soc2",
     "sql-dump",
     "postgres",
     "mysql",
@@ -55,6 +59,15 @@ dependencies = [
 parquet = [
     "pyarrow>=14.0.0",
 ]
+otel = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+]
+all = [
+    "pyarrow>=14.0.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
@@ -75,8 +88,14 @@ Changelog = "https://github.com/latryee/CloakDB/blob/main/CHANGELOG.md"
 [project.scripts]
 cloakdb = "cloakdb.cli:app"
 
+[project.entry-points."cloakdb.strategies"]
+# Example placeholder for dynamic plugins
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+cloakdb = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -140,5 +159,6 @@ exclude = ["tests/"]
 module = [
     "faker.*",
     "pyarrow.*",
+    "opentelemetry.*",
 ]
 ignore_missing_imports = true

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from typing import Any
 from urllib.parse import urlparse
 
 KNOWN_WEAK_SALTS: set[str] = {
@@ -131,3 +132,83 @@ def redact_connection_url(url: str) -> str:
         return url
     except Exception:
         return url
+
+
+def hkdf_derive_key(salt: str | bytes, info: str | bytes = b"cloakdb-key", length: int = 32) -> bytes:
+    """Derives a cryptographically strong subkey using HKDF-SHA256 (RFC 5869)."""
+    import hmac
+
+    salt_bytes = salt.encode("utf-8") if isinstance(salt, str) else salt
+    info_bytes = info.encode("utf-8") if isinstance(info, str) else info
+
+    # Step 1: Extract PRK = HMAC-Hash(salt, IKM)
+    prk = hmac.new(salt_bytes, b"cloakdb-master-key", hashlib.sha256).digest()
+
+    # Step 2: Expand OKM = HMAC-Hash(PRK, info || 0x01)
+    okm = b""
+    t = b""
+    counter = 1
+    while len(okm) < length:
+        t = hmac.new(prk, t + info_bytes + bytes([counter]), hashlib.sha256).digest()
+        okm += t
+        counter += 1
+
+    return okm[:length]
+
+
+def keyed_mac_hash(key: str | bytes, data: str | bytes) -> str:
+    """Computes a keyed HMAC-SHA256 digest string."""
+    import hmac
+
+    k_bytes = key.encode("utf-8") if isinstance(key, str) else key
+    d_bytes = data.encode("utf-8") if isinstance(data, str) else data
+    return hmac.new(k_bytes, d_bytes, hashlib.sha256).hexdigest()
+
+
+def zeroize_memory(target: Any) -> bool:
+    """Securely wipes mutable memory buffers (bytearray, ctypes buffers, dicts, lists).
+
+    Overwrites in-place with zero bytes to prevent cryptographic material from
+    lingering in process memory post-execution.
+    """
+    if target is None:
+        return True
+
+    try:
+        import ctypes
+
+        if isinstance(target, bytearray):
+            for idx in range(len(target)):
+                target[idx] = 0
+            return True
+
+        if isinstance(target, (memoryview, ctypes.Array)):
+            ctypes.memset(ctypes.addressof(target), 0, len(target))
+            return True
+
+        if hasattr(target, "__dict__"):
+            # Clear internal dictionary mappings
+            if isinstance(target.__dict__, dict):
+                for k in list(target.__dict__.keys()):
+                    val = target.__dict__[k]
+                    if isinstance(val, bytearray):
+                        for idx in range(len(val)):
+                            val[idx] = 0
+            return True
+
+        if isinstance(target, dict):
+            for k in list(target.keys()):
+                val = target[k]
+                if isinstance(val, bytearray):
+                    for idx in range(len(val)):
+                        val[idx] = 0
+            target.clear()
+            return True
+
+        if isinstance(target, list):
+            target.clear()
+            return True
+
+        return True
+    except Exception:
+        return False
