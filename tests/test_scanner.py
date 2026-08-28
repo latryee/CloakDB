@@ -77,7 +77,6 @@ def test_credit_card_negative_detection_reduces_false_positives():
     assert res_prefix is None or res_prefix.pii_type != "credit_card"
 
 
-
 def test_scanner_sql_dump(postgres_dump_file: Path):
     generator = ConfigGenerator()
     detections = generator.scan_sql_dump(postgres_dump_file)

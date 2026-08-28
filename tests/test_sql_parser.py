@@ -167,7 +167,7 @@ def test_json_stream_parser():
     output = out_stream.getvalue()
     assert "abc123xyz" not in output
     assert "def456uvw" not in output
-    assert '"secret": null' in output or '"secret": "NULL"' in output or 'null' in output
+    assert '"secret": null' in output or '"secret": "NULL"' in output or "null" in output
 
 
 def test_sql_parser_semicolon_inside_string_literal():
@@ -255,7 +255,9 @@ def test_csv_and_json_stream_parser_tracks_bytes():
     # 2. Test JSONL byte tracking
     json_engine = CloakEngine(config)
     json_parser = JSONLinesStreamParser(table_name="users")
-    json_input = io.StringIO('{"id": 1, "email": "alice@example.com"}\n{"id": 2, "email": "bob@example.com"}\n')
+    json_input = io.StringIO(
+        '{"id": 1, "email": "alice@example.com"}\n{"id": 2, "email": "bob@example.com"}\n'
+    )
     json_output = io.StringIO()
     json_parser.process_stream(json_input, json_output, json_engine)
     assert json_engine.stats.bytes_processed > 0
@@ -283,4 +285,3 @@ def test_json_stream_parser_malformed_line_error():
     assert "line 2" in error_msg
     assert "Malformed JSON on line 2" in error_msg
     assert "{id: 2" in error_msg
-

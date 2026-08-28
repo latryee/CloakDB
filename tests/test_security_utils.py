@@ -33,5 +33,8 @@ def test_redact_connection_url_with_query_string():
 def test_redact_connection_url_file_path():
     assert redact_connection_url("dump.sql") == "dump.sql"
     assert redact_connection_url("/var/data/customers.csv") == "/var/data/customers.csv"
-    assert redact_connection_url("C:\\Users\\Lati\\Desktop\\dump.sql") == "C:\\Users\\Lati\\Desktop\\dump.sql"
+    assert (
+        redact_connection_url("C:\\Users\\Lati\\Desktop\\dump.sql")
+        == "C:\\Users\\Lati\\Desktop\\dump.sql"
+    )
     assert redact_connection_url("sqlite:///local_cache.db") == "sqlite:///local_cache.db"

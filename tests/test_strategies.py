@@ -116,7 +116,9 @@ def test_faker_does_not_mutate_global_random_state(base_context: TransformationC
     _ = strat.transform("test_val_3", base_context, provider="address", deterministic=True)
 
     state_after = random.getstate()
-    assert state_before == state_after, "Faker strategy must not mutate Python's global random state"
+    assert state_before == state_after, (
+        "Faker strategy must not mutate Python's global random state"
+    )
 
 
 def test_faker_multithreaded_concurrency(base_context: TransformationContext):

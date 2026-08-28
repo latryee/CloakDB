@@ -198,7 +198,17 @@ def test_cli_apply_workers_warning_for_csv_and_jsonl(tmp_path: Path, csv_file: P
     out_csv = tmp_path / "out_csv.csv"
     res_csv = runner.invoke(
         app,
-        ["apply", "-c", str(config_file), "-i", str(csv_file), "-o", str(out_csv), "--workers", "4"],
+        [
+            "apply",
+            "-c",
+            str(config_file),
+            "-i",
+            str(csv_file),
+            "-o",
+            str(out_csv),
+            "--workers",
+            "4",
+        ],
     )
     assert res_csv.exit_code == 0
     assert "Parallel processing (--workers 4) is not yet supported for CSV" in res_csv.output
@@ -209,11 +219,20 @@ def test_cli_apply_workers_warning_for_csv_and_jsonl(tmp_path: Path, csv_file: P
     out_jsonl = tmp_path / "out_jsonl.jsonl"
     res_jsonl = runner.invoke(
         app,
-        ["apply", "-c", str(config_file), "-i", str(jsonl_in), "-o", str(out_jsonl), "--workers", "4"],
+        [
+            "apply",
+            "-c",
+            str(config_file),
+            "-i",
+            str(jsonl_in),
+            "-o",
+            str(out_jsonl),
+            "--workers",
+            "4",
+        ],
     )
     assert res_jsonl.exit_code == 0
     assert "Parallel processing (--workers 4) is not yet supported for JSONL" in res_jsonl.output
-
 
 
 def test_cli_apply_missing_file_errors(tmp_path: Path):
