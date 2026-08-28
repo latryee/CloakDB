@@ -155,29 +155,49 @@ cloakdb apply -c cloakdb.yaml -i dump.sql -o sanitized_dump.sql --workers 4
 ## 🛠️ CLI Commands Reference
 
 ### `cloakdb scan`
-Auto-scans a SQL dump, CSV, or live database URL and detects sensitive columns.
+Auto-scans a SQL dump, CSV, or live database URL and detects sensitive columns with automated Foreign Key relationship inference.
 ```bash
-# Scan a SQL dump file
-cloakdb scan production_dump.sql -o cloakdb.yaml
+# Scan a SQL dump file and automatically discover Foreign Key relationships
+cloakdb scan production_dump.sql --infer-fks -o cloakdb.yaml
 
 # Scan a CSV file with Turkish locale heuristics
 cloakdb scan customers.csv --locale tr_TR -o cloakdb.yaml
 
 # Scan a live database connection (PostgreSQL / MySQL / SQLite)
-cloakdb scan "postgresql://user:pass@localhost:5432/proddb" -o cloakdb.yaml
+cloakdb scan "postgresql://user:pass@localhost:5432/proddb" --infer-fks -o cloakdb.yaml
 ```
 
 ### `cloakdb apply`
-Streams and masks input datasets or live tables with optional multi-core workers.
+Streams and masks input datasets or live tables with optional multi-core workers, CDC incremental filtering, and stateless execution.
 ```bash
 # Stream mask a SQL dump using 4 parallel worker processes
 cloakdb apply -c cloakdb.yaml -i dump.sql -o sanitized.sql --workers 4
 
+# Incremental masking (only transform records modified after timestamp)
+cloakdb apply -c cloakdb.yaml -i dump.sql -o delta.sql --since 2026-06-01 --incremental-column updated_at
+
+# Stateless mode: O(1) constant memory without LRU cache for infinite streams
+cloakdb apply -c cloakdb.yaml -i dump.sql -o sanitized.sql --stateless
+
 # Dry-run validation without writing output
 cloakdb apply -c cloakdb.yaml -i dump.sql --dry-run
 
-# Mask a live SQLite or PostgreSQL database in-place
+# Mask a live SQLite or PostgreSQL database in-place (with production guard safety)
 cloakdb apply -c cloakdb.yaml -i "sqlite:///staging.db"
+```
+
+### `cloakdb verify`
+Audits masked datasets, CSV files, and SQL dumps using cryptographic checksums (Luhn Mod-10, TCKN Mod-10/11, IBAN Mod-97) to mathematically assert **zero unmasked PII remains**.
+```bash
+# Verify a masked SQL dump or CSV export for GDPR/KVKK compliance (exit code 0 = clean)
+cloakdb verify -i sanitized.sql
+```
+
+### `cloakdb diff`
+Side-by-side terminal comparison evaluating masking output differences between two configuration files against sample data.
+```bash
+# Compare two masking policies on sample data
+cloakdb diff -c1 policy_v1.yaml -c2 policy_v2.yaml -i customers.csv -n 5
 ```
 
 ### `cloakdb preview`
@@ -187,7 +207,7 @@ cloakdb preview -c cloakdb.yaml -i dump.sql --limit 10
 ```
 
 ### `cloakdb init`
-Creates a starter configuration file with example rules.
+Creates a starter configuration file with example rules and a cryptographically strong random salt.
 ```bash
 cloakdb init --output cloakdb.yaml
 ```
@@ -202,6 +222,23 @@ cloakdb strategies
 Runs an in-memory throughput benchmark across multi-column strategy workloads.
 ```bash
 cloakdb bench --rows 50000
+```
+
+---
+
+## 🐳 Docker Deployment
+
+CloakDB includes a production-ready, non-root (`cloakdb:10001`) container image:
+
+```bash
+# Build the container image
+docker build -t cloakdb .
+
+# Run masking inside Docker mounting local workspace
+docker run --rm -v $(pwd):/data cloakdb apply \
+  -c /data/cloakdb.yaml \
+  -i /data/production_dump.sql \
+  -o /data/sanitized_dump.sql
 ```
 
 ---
