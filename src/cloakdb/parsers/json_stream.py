@@ -26,12 +26,23 @@ class JSONLinesStreamParser(BaseStreamParser):
         row_count = 0
         bytes_count = 0
 
-        for line in input_stream:
+        for line_num, line in enumerate(input_stream, start=1):
+            line_len = len(line.encode("utf-8"))
+            bytes_count += line_len
+            engine.stats.bytes_processed += line_len
+
             line_str = line.strip()
             if not line_str:
                 continue
 
-            record = json.loads(line_str)
+            try:
+                record = json.loads(line_str)
+            except Exception as exc:
+                snippet = line_str[:80] + "..." if len(line_str) > 80 else line_str
+                raise ValueError(
+                    f"Malformed JSON on line {line_num}: {exc}. Snippet: {snippet!r}"
+                ) from exc
+
             masked_record = engine.mask_record(
                 table_name=self.table_name,
                 record=record,

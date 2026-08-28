@@ -3,6 +3,8 @@
 import io
 from pathlib import Path
 
+import pytest
+
 from cloakdb.config.models import CloakConfig, ColumnRule, GlobalConfig, TableRule
 from cloakdb.core.engine import CloakEngine
 from cloakdb.parsers.csv_stream import CSVStreamParser
@@ -232,3 +234,53 @@ def test_sql_parser_multiline_string_with_newlines():
     assert "Paragraph 3: Semicolons; and (parentheses) inside quotes." in output
     assert "Single line body" in output
     assert engine.stats.rows_processed == 2
+
+
+def test_csv_and_json_stream_parser_tracks_bytes():
+    config = CloakConfig(
+        version="1",
+        global_settings=GlobalConfig(salt="test-salt"),
+        tables={"users": TableRule(columns={"email": ColumnRule(strategy="nullify")})},
+    )
+
+    # 1. Test CSV byte tracking
+    csv_engine = CloakEngine(config)
+    csv_parser = CSVStreamParser(table_name="users")
+    csv_input = io.StringIO("id,email\n1,alice@example.com\n2,bob@example.com\n")
+    csv_output = io.StringIO()
+    csv_parser.process_stream(csv_input, csv_output, csv_engine)
+    assert csv_engine.stats.bytes_processed > 0
+    assert csv_engine.stats.rows_processed == 2
+
+    # 2. Test JSONL byte tracking
+    json_engine = CloakEngine(config)
+    json_parser = JSONLinesStreamParser(table_name="users")
+    json_input = io.StringIO('{"id": 1, "email": "alice@example.com"}\n{"id": 2, "email": "bob@example.com"}\n')
+    json_output = io.StringIO()
+    json_parser.process_stream(json_input, json_output, json_engine)
+    assert json_engine.stats.bytes_processed > 0
+    assert json_engine.stats.rows_processed == 2
+
+
+def test_json_stream_parser_malformed_line_error():
+    config = CloakConfig(
+        version="1",
+        global_settings=GlobalConfig(salt="test-salt"),
+        tables={"users": TableRule(columns={"email": ColumnRule(strategy="nullify")})},
+    )
+    engine = CloakEngine(config)
+    parser = JSONLinesStreamParser(table_name="users")
+
+    # Line 2 is intentionally malformed JSON
+    bad_jsonl = '{"id": 1, "email": "valid@test.com"}\n{id: 2, invalid_json_syntax}\n{"id": 3}\n'
+    in_stream = io.StringIO(bad_jsonl)
+    out_stream = io.StringIO()
+
+    with pytest.raises(ValueError) as exc_info:
+        parser.process_stream(in_stream, out_stream, engine)
+
+    error_msg = str(exc_info.value)
+    assert "line 2" in error_msg
+    assert "Malformed JSON on line 2" in error_msg
+    assert "{id: 2" in error_msg
+

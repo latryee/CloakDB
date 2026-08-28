@@ -31,11 +31,18 @@ class CSVStreamParser(BaseStreamParser):
         if header is None:
             return
 
+        header_bytes = len(self.delimiter.join(header).encode("utf-8")) + 1
+        bytes_count = header_bytes
+        engine.stats.bytes_processed += header_bytes
+
         writer.writerow(header)
         row_count = 0
-        bytes_count = 0
 
         for row in reader:
+            row_bytes = len(self.delimiter.join(row).encode("utf-8")) + 1
+            bytes_count += row_bytes
+            engine.stats.bytes_processed += row_bytes
+
             masked_row = engine.mask_row_values(
                 table_name=self.table_name,
                 column_names=header,
