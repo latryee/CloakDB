@@ -270,7 +270,9 @@ class SQLDumpStreamParser(BaseStreamParser):
 
                     masked_values = engine.mask_row_values(
                         table_name=copy_table,
-                        column_names=copy_columns if copy_columns else [f"col_{i}" for i in range(len(cells))],
+                        column_names=copy_columns
+                        if copy_columns
+                        else [f"col_{i}" for i in range(len(cells))],
                         row_values=cells,
                         row_index=row_count,
                     )
@@ -298,7 +300,9 @@ class SQLDumpStreamParser(BaseStreamParser):
 
                     masked_values = engine.mask_row_values(
                         table_name=copy_table,
-                        column_names=copy_columns if copy_columns else [f"col_{i}" for i in range(len(cells))],
+                        column_names=copy_columns
+                        if copy_columns
+                        else [f"col_{i}" for i in range(len(cells))],
                         row_values=parsed_values,
                         row_index=row_count,
                     )

@@ -71,7 +71,9 @@ class CloakTelemetry:
 
     @classmethod
     @contextmanager
-    def span(cls, name: str, attributes: dict[str, Any] | None = None) -> Generator[Any, None, None]:
+    def span(
+        cls, name: str, attributes: dict[str, Any] | None = None
+    ) -> Generator[Any, None, None]:
         """Creates an OpenTelemetry tracing span with context management."""
         if cls._tracer and cls._enabled:
             with cls._tracer.start_as_current_span(name) as span:
@@ -83,7 +85,9 @@ class CloakTelemetry:
             yield _NullSpan()
 
     @classmethod
-    def record_metric(cls, metric_name: str, value: float | int, labels: dict[str, str] | None = None) -> None:
+    def record_metric(
+        cls, metric_name: str, value: float | int, labels: dict[str, str] | None = None
+    ) -> None:
         """Records an execution metric counter or gauge."""
         key = f"{metric_name}:{labels or {}}"
         cls._metrics[key] = value

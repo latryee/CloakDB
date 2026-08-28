@@ -194,7 +194,11 @@ def test_cli_diff_json_and_jsonl(tmp_path: Path):
     cfg2 = CloakConfig(
         version="1",
         global_settings=GlobalConfig(salt=salt),
-        tables={"items": TableRule(columns={"email": ColumnRule(strategy="constant", params={"value_to_set": "X"})})},
+        tables={
+            "items": TableRule(
+                columns={"email": ColumnRule(strategy="constant", params={"value_to_set": "X"})}
+            )
+        },
     )
     c1 = tmp_path / "c1.yaml"
     c2 = tmp_path / "c2.yaml"
@@ -230,14 +234,34 @@ def test_generator_fk_inference(tmp_path: Path):
     )
     detections = {
         "users": [
-            MagicMock(column_name="id", pii_type="user_id", confidence=0.9, recommended_strategy="deterministic_hash", recommended_params={"as_integer": True}),
-            MagicMock(column_name="email", pii_type="email", confidence=0.9, recommended_strategy="faker", recommended_params={"provider": "email"}),
+            MagicMock(
+                column_name="id",
+                pii_type="user_id",
+                confidence=0.9,
+                recommended_strategy="deterministic_hash",
+                recommended_params={"as_integer": True},
+            ),
+            MagicMock(
+                column_name="email",
+                pii_type="email",
+                confidence=0.9,
+                recommended_strategy="faker",
+                recommended_params={"provider": "email"},
+            ),
         ],
         "orders": [
-            MagicMock(column_name="user_id", pii_type="user_id", confidence=0.9, recommended_strategy="deterministic_hash", recommended_params={"as_integer": True}),
+            MagicMock(
+                column_name="user_id",
+                pii_type="user_id",
+                confidence=0.9,
+                recommended_strategy="deterministic_hash",
+                recommended_params={"as_integer": True},
+            ),
         ],
     }
-    cfg = generator.generate_config_from_detections(detections, target=str(sql_file), infer_fks=True)
+    cfg = generator.generate_config_from_detections(
+        detections, target=str(sql_file), infer_fks=True
+    )
     assert len(cfg.tables) == 2
     assert len(cfg.consistency_groups) >= 1
 
@@ -246,10 +270,7 @@ def test_generator_scan_sql_dump_copy_mode(tmp_path: Path):
     generator = ConfigGenerator()
     dump_file = tmp_path / "dump.sql"
     dump_file.write_text(
-        "COPY users (id, email) FROM stdin;\n"
-        "1\talice@corp.com\n"
-        "2\t\\N\n"
-        "\\.\n",
+        "COPY users (id, email) FROM stdin;\n1\talice@corp.com\n2\t\\N\n\\.\n",
         encoding="utf-8",
     )
     detections = generator.scan_sql_dump(str(dump_file))
@@ -267,10 +288,28 @@ def test_generator_alter_table_fk_inference(tmp_path: Path):
         encoding="utf-8",
     )
     detections = {
-        "users": [MagicMock(column_name="id", pii_type="user_id", confidence=0.9, recommended_strategy="deterministic_hash", recommended_params={"as_integer": True})],
-        "orders": [MagicMock(column_name="customer_id", pii_type="user_id", confidence=0.9, recommended_strategy="deterministic_hash", recommended_params={"as_integer": True})],
+        "users": [
+            MagicMock(
+                column_name="id",
+                pii_type="user_id",
+                confidence=0.9,
+                recommended_strategy="deterministic_hash",
+                recommended_params={"as_integer": True},
+            )
+        ],
+        "orders": [
+            MagicMock(
+                column_name="customer_id",
+                pii_type="user_id",
+                confidence=0.9,
+                recommended_strategy="deterministic_hash",
+                recommended_params={"as_integer": True},
+            )
+        ],
     }
-    cfg = generator.generate_config_from_detections(detections, target=str(sql_file), infer_fks=True)
+    cfg = generator.generate_config_from_detections(
+        detections, target=str(sql_file), infer_fks=True
+    )
     assert len(cfg.consistency_groups) >= 1
 
 
@@ -295,14 +334,18 @@ def test_live_db_connector_mocked(tmp_path: Path):
     engine = create_engine(db_url)
     meta = MetaData()
     users = Table(
-        "users", meta,
+        "users",
+        meta,
         Column("id", Integer, primary_key=True),
         Column("email", String(100)),
     )
     meta.create_all(engine)
 
     with engine.connect() as conn:
-        conn.execute(users.insert(), [{"id": 1, "email": "alice@test.com"}, {"id": 2, "email": "bob@test.com"}])
+        conn.execute(
+            users.insert(),
+            [{"id": 1, "email": "alice@test.com"}, {"id": 2, "email": "bob@test.com"}],
+        )
         conn.commit()
 
     connector = LiveDatabaseConnector(db_url)
@@ -315,7 +358,9 @@ def test_live_db_connector_mocked(tmp_path: Path):
     # Mask in place with CloakEngine
     cfg = CloakConfig(
         version="1",
-        global_settings=GlobalConfig(salt="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+        global_settings=GlobalConfig(
+            salt="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        ),
         tables={"users": TableRule(columns={"email": ColumnRule(strategy="nullify")})},
     )
     cloak_engine = CloakEngine(cfg)

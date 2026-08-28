@@ -175,7 +175,9 @@ class FPEStrategy(MaskingStrategy):
         else:
             alpha = alphabet or DIGITS
 
-        key = hashlib.sha256(f"fpe:{context.salt}:{context.table_name}:{context.column_name}".encode()).digest()
+        key = hashlib.sha256(
+            f"fpe:{context.salt}:{context.table_name}:{context.column_name}".encode()
+        ).digest()
         tweak_bytes = (tweak or f"{context.table_name}.{context.column_name}").encode("utf-8")
 
         fpe = FeistelFPE(key, alphabet=alpha, rounds=rounds)
@@ -237,7 +239,9 @@ class FPECreditCardStrategy(MaskingStrategy):
         else:
             encrypt_target = digits_only[prefix_len : n_digits - suffix_len]
 
-        key = hashlib.sha256(f"fpe_cc:{context.salt}:{context.table_name}:{context.column_name}".encode()).digest()
+        key = hashlib.sha256(
+            f"fpe_cc:{context.salt}:{context.table_name}:{context.column_name}".encode()
+        ).digest()
         tweak = f"cc:{context.table_name}:{prefix_len}".encode()
         fpe = FeistelFPE(key, alphabet=DIGITS, rounds=8)
         enc_middle = fpe.encrypt("".join(encrypt_target), tweak=tweak)
@@ -298,7 +302,9 @@ class FPEPhoneNumberStrategy(MaskingStrategy):
         prefix = digits_only[:prefix_len]
         to_encrypt = digits_only[prefix_len:]
 
-        key = hashlib.sha256(f"fpe_phone:{context.salt}:{context.table_name}:{context.column_name}".encode()).digest()
+        key = hashlib.sha256(
+            f"fpe_phone:{context.salt}:{context.table_name}:{context.column_name}".encode()
+        ).digest()
         tweak = f"phone:{context.table_name}:{prefix_len}".encode()
         fpe = FeistelFPE(key, alphabet=DIGITS, rounds=8)
         enc_digits = prefix + list(fpe.encrypt("".join(to_encrypt), tweak=tweak))
@@ -318,7 +324,9 @@ class FPEPhoneNumberStrategy(MaskingStrategy):
 class FPENationalIDStrategy(MaskingStrategy):
     """FPE for National IDs / SSNs / TCKN with structure and checksum preservation."""
 
-    description = "Encrypts national identity numbers and SSNs with FPE and valid checksum calculation"
+    description = (
+        "Encrypts national identity numbers and SSNs with FPE and valid checksum calculation"
+    )
 
     def transform(
         self,
@@ -336,10 +344,14 @@ class FPENationalIDStrategy(MaskingStrategy):
         digits = [c for c in val_str if c in DIGITS]
         n_digits = len(digits)
 
-        key = hashlib.sha256(f"fpe_id:{context.salt}:{context.table_name}:{context.column_name}".encode()).digest()
+        key = hashlib.sha256(
+            f"fpe_id:{context.salt}:{context.table_name}:{context.column_name}".encode()
+        ).digest()
         tweak = f"id:{context.table_name}:{n_digits}".encode()
 
-        is_tckn = (id_type.lower() == "tckn") or (id_type.lower() == "auto" and n_digits == 11 and not any(c in val_str for c in "-/."))
+        is_tckn = (id_type.lower() == "tckn") or (
+            id_type.lower() == "auto" and n_digits == 11 and not any(c in val_str for c in "-/.")
+        )
         if is_tckn and n_digits == 11:
             fpe = FeistelFPE(key, alphabet=DIGITS, rounds=8)
             raw9 = fpe.encrypt("".join(digits[:9]), tweak=tweak)
@@ -369,7 +381,9 @@ class FPENationalIDStrategy(MaskingStrategy):
 class FPEEmailStrategy(MaskingStrategy):
     """FPE for Email addresses: preserves domain while encrypting local part with format preservation."""
 
-    description = "Encrypts email addresses preserving domain and local part length and character structure"
+    description = (
+        "Encrypts email addresses preserving domain and local part length and character structure"
+    )
 
     def transform(
         self,
@@ -384,13 +398,17 @@ class FPEEmailStrategy(MaskingStrategy):
 
         val_str = str(value).strip()
         if "@" not in val_str:
-            return FPEStrategy().transform(val_str, context, alphabet=ALPHANUMERIC, preserve_format=True)
+            return FPEStrategy().transform(
+                val_str, context, alphabet=ALPHANUMERIC, preserve_format=True
+            )
 
         local_part, domain_part = val_str.split("@", 1)
         if not local_part:
             return val_str
 
-        key = hashlib.sha256(f"fpe_email:{context.salt}:{context.table_name}:{context.column_name}".encode()).digest()
+        key = hashlib.sha256(
+            f"fpe_email:{context.salt}:{context.table_name}:{context.column_name}".encode()
+        ).digest()
         tweak = f"email:{domain_part}".encode()
 
         fpe = FeistelFPE(key, alphabet=ALPHANUMERIC, rounds=8)

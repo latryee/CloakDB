@@ -13,7 +13,11 @@ from cloakdb.strategies.fpe import (
 )
 
 
-def _make_context(salt: str = "test-salt-64-character-cryptographic-string-padding-ok", table: str = "users", column: str = "test_col") -> TransformationContext:
+def _make_context(
+    salt: str = "test-salt-64-character-cryptographic-string-padding-ok",
+    table: str = "users",
+    column: str = "test_col",
+) -> TransformationContext:
     return TransformationContext(
         table_name=table,
         column_name=column,
@@ -113,7 +117,9 @@ def test_fpe_credit_card_luhn_validity():
     assert len(res_short) == 5
 
     # Non-luhn and no-delimiter options
-    masked_no_luhn = strat.transform("4532123456789010", ctx, luhn_checksum=False, preserve_delimiters=False)
+    masked_no_luhn = strat.transform(
+        "4532123456789010", ctx, luhn_checksum=False, preserve_delimiters=False
+    )
     assert len(masked_no_luhn) == 16
 
 

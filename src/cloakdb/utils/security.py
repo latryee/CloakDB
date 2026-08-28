@@ -134,7 +134,9 @@ def redact_connection_url(url: str) -> str:
         return url
 
 
-def hkdf_derive_key(salt: str | bytes, info: str | bytes = b"cloakdb-key", length: int = 32) -> bytes:
+def hkdf_derive_key(
+    salt: str | bytes, info: str | bytes = b"cloakdb-key", length: int = 32
+) -> bytes:
     """Derives a cryptographically strong subkey using HKDF-SHA256 (RFC 5869)."""
     import hmac
 
@@ -182,7 +184,12 @@ def zeroize_memory(target: Any) -> bool:
                 target[idx] = 0
             return True
 
-        if isinstance(target, (memoryview, ctypes.Array)):
+        if isinstance(target, memoryview):
+            for idx in range(len(target)):
+                target[idx] = 0
+            return True
+
+        if isinstance(target, ctypes.Array):
             ctypes.memset(ctypes.addressof(target), 0, len(target))
             return True
 

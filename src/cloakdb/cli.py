@@ -22,7 +22,6 @@ from cloakdb.connectors.live_db import LiveDatabaseConnector
 from cloakdb.core.engine import CloakEngine
 from cloakdb.observability.audit import generate_audit_log, verify_audit_log
 from cloakdb.observability.telemetry import CloakTelemetry, setup_structured_logging
-from cloakdb.parsers.base import BaseStreamParser
 from cloakdb.parsers.csv_stream import CSVStreamParser
 from cloakdb.parsers.json_stream import JSONLinesStreamParser
 from cloakdb.parsers.sql_dump import SQLDumpStreamParser
@@ -526,7 +525,7 @@ def _run_masking(
             out_path = Path(output_target) if output_target else None
 
             # Select stream parser based on extension and worker count
-            parser: BaseStreamParser
+            parser: Any
             if in_path.suffix.lower() == ".csv":
                 if workers > 1:
                     console.print(
@@ -596,19 +595,27 @@ def _run_masking(
                             in_path, out_path, engine, progress_callback=_on_progress
                         )
                 else:
-                    with in_path.open("r", encoding="utf-8", errors="replace") as in_stream:
+                    with in_path.open("r", encoding="utf-8", errors="replace") as in_text_stream:
                         if dry_run or not out_path:
                             import io
 
-                            null_out = io.StringIO()
+                            null_text_out = io.StringIO()
                             parser.process_stream(
-                                in_stream, null_out, engine, progress_callback=_on_progress
+                                in_text_stream,
+                                null_text_out,
+                                engine,
+                                progress_callback=_on_progress,
                             )
                         else:
                             out_path.parent.mkdir(parents=True, exist_ok=True)
-                            with out_path.open("w", encoding="utf-8", newline="") as out_stream:
+                            with out_path.open(
+                                "w", encoding="utf-8", newline=""
+                            ) as out_text_stream:
                                 parser.process_stream(
-                                    in_stream, out_stream, engine, progress_callback=_on_progress
+                                    in_text_stream,
+                                    out_text_stream,
+                                    engine,
+                                    progress_callback=_on_progress,
                                 )
 
     duration = max(0.001, time.perf_counter() - start_time)
@@ -703,7 +710,9 @@ def mask(
         None, "--incremental-column", help="Column name to check for incremental threshold"
     ),
     audit_log: str | None = typer.Option(
-        None, "--audit-log", help="Generate and write a signed SOC2 audit log JSON file to this path"
+        None,
+        "--audit-log",
+        help="Generate and write a signed SOC2 audit log JSON file to this path",
     ),
     otel_endpoint: str | None = typer.Option(
         None, "--otel-endpoint", help="OpenTelemetry OTLP collector endpoint URL"
@@ -780,7 +789,9 @@ def apply(
         None, "--incremental-column", help="Column name to check for incremental threshold"
     ),
     audit_log: str | None = typer.Option(
-        None, "--audit-log", help="Generate and write a signed SOC2 audit log JSON file to this path"
+        None,
+        "--audit-log",
+        help="Generate and write a signed SOC2 audit log JSON file to this path",
     ),
     otel_endpoint: str | None = typer.Option(
         None, "--otel-endpoint", help="OpenTelemetry OTLP collector endpoint URL"
@@ -875,7 +886,9 @@ def lint(
             configured_cols = {c.lower() for c in tbl_rule.columns.keys()}
             for r in results:
                 if r.column_name.lower() not in configured_cols:
-                    unmapped_sensitive_cols.append((tbl_name, r.column_name, r.pii_type, r.confidence))
+                    unmapped_sensitive_cols.append(
+                        (tbl_name, r.column_name, r.pii_type, r.confidence)
+                    )
 
     for tbl_lower, (tbl_name, _) in configured_tables.items():
         if tbl_lower not in dataset_tables and dataset_tables:
@@ -945,7 +958,9 @@ def audit_log(
 ) -> None:
     """Verify cryptographically signed audit log trails for SOC2 & ISO 27001 compliance."""
     if not verify_file:
-        console.print("[yellow]Usage: cloakdb audit-log --verify <audit.json> --config <cloakdb.yaml>[/yellow]")
+        console.print(
+            "[yellow]Usage: cloakdb audit-log --verify <audit.json> --config <cloakdb.yaml>[/yellow]"
+        )
         return
 
     effective_key = key

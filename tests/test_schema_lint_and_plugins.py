@@ -56,9 +56,7 @@ def test_schema_lint_drift_detected(tmp_path: Path):
     save_config(config, cfg_file)
 
     csv_file = tmp_path / "users.csv"
-    csv_file.write_text(
-        "full_name,credit_card\nJohn Doe,4532-1234-5678-9010\n", encoding="utf-8"
-    )
+    csv_file.write_text("full_name,credit_card\nJohn Doe,4532-1234-5678-9010\n", encoding="utf-8")
 
     result = runner.invoke(app, ["lint", "-c", str(cfg_file), "-i", str(csv_file)])
     assert result.exit_code == 1
@@ -102,9 +100,7 @@ def test_audit_log_cli_verify(tmp_path: Path):
     assert "PASS" in verify_res.stdout
 
     # Verify with direct --key
-    verify_key_res = runner.invoke(
-        app, ["audit-log", "--verify", str(audit_file), "--key", salt]
-    )
+    verify_key_res = runner.invoke(app, ["audit-log", "--verify", str(audit_file), "--key", salt])
     assert verify_key_res.exit_code == 0
 
     # Verify with invalid key
@@ -117,6 +113,7 @@ def test_audit_log_cli_verify(tmp_path: Path):
 def test_custom_strategy_plugin_loader():
     class CustomPluginStrategy(MaskingStrategy):
         description = "Custom test plugin"
+
         def transform(self, value, context, **kwargs):
             return f"custom_{value}"
 

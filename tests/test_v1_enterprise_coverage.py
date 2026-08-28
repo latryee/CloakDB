@@ -53,14 +53,21 @@ def test_cli_security_checks(tmp_path: Path):
 
     # Production safety check
     with pytest.raises(typer.Exit):
-        _check_production_safety("postgresql://user:pass@prod-db.internal:5432/main", confirm_production=False)
-    _check_production_safety("postgresql://user:pass@prod-db.internal:5432/main", confirm_production=True)
+        _check_production_safety(
+            "postgresql://user:pass@prod-db.internal:5432/main", confirm_production=False
+        )
+    _check_production_safety(
+        "postgresql://user:pass@prod-db.internal:5432/main", confirm_production=True
+    )
     _check_production_safety("sqlite:///local.db", confirm_production=False)
 
     # Salt mismatch check
     cfg = CloakConfig(
         version="1",
-        global_settings=GlobalConfig(salt="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", salt_fingerprint="mismatch_fp"),
+        global_settings=GlobalConfig(
+            salt="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            salt_fingerprint="mismatch_fp",
+        ),
         tables={},
     )
     cfg_file = tmp_path / "cfg.yaml"
@@ -71,7 +78,9 @@ def test_cli_security_checks(tmp_path: Path):
         _check_salt_fingerprint(cfg, ignore_salt_mismatch=False, update_salt_fingerprint=False)
 
     # Update fingerprint
-    _check_salt_fingerprint(cfg, ignore_salt_mismatch=False, update_salt_fingerprint=True, config_path=cfg_file)
+    _check_salt_fingerprint(
+        cfg, ignore_salt_mismatch=False, update_salt_fingerprint=True, config_path=cfg_file
+    )
     reloaded = load_config(cfg_file)
     assert reloaded.global_settings.salt_fingerprint == cfg.global_settings.compute_fingerprint()
 
@@ -106,14 +115,20 @@ def test_cli_mask_and_apply_full_options(tmp_path: Path):
         app,
         [
             "mask",
-            "-c", str(cfg_file),
-            "-i", str(sql_file),
-            "-o", str(out_file),
-            "--seed", "1234",
-            "--locale", "en_US",
+            "-c",
+            str(cfg_file),
+            "-i",
+            str(sql_file),
+            "-o",
+            str(out_file),
+            "--seed",
+            "1234",
+            "--locale",
+            "en_US",
             "--stateless",
             "--json-logs",
-            "--audit-log", str(audit_file),
+            "--audit-log",
+            str(audit_file),
         ],
     )
     assert res_mask.exit_code == 0
@@ -125,8 +140,10 @@ def test_cli_mask_and_apply_full_options(tmp_path: Path):
         app,
         [
             "apply",
-            "-c", str(cfg_file),
-            "-i", str(sql_file),
+            "-c",
+            str(cfg_file),
+            "-i",
+            str(sql_file),
             "--dry-run",
         ],
     )
@@ -166,7 +183,15 @@ def test_cli_preview_and_diff(tmp_path: Path):
     config2 = CloakConfig(
         version="1",
         global_settings=GlobalConfig(salt=salt),
-        tables={"users": TableRule(columns={"email": ColumnRule(strategy="constant", params={"value_to_set": "anon@test.com"})})},
+        tables={
+            "users": TableRule(
+                columns={
+                    "email": ColumnRule(
+                        strategy="constant", params={"value_to_set": "anon@test.com"}
+                    )
+                }
+            )
+        },
     )
     cfg1 = tmp_path / "cfg1.yaml"
     cfg2 = tmp_path / "cfg2.yaml"
@@ -226,7 +251,11 @@ def test_lru_cache_and_integrity_manager():
 
     mgr = ReferentialIntegrityManager(
         groups=[
-            ConsistencyGroup(name="user_group", columns=["users.user_id", "orders.customer_id"], strategy="deterministic_hash")
+            ConsistencyGroup(
+                name="user_group",
+                columns=["users.user_id", "orders.customer_id"],
+                strategy="deterministic_hash",
+            )
         ]
     )
     grp = mgr.get_group_for_column("users", "user_id")
@@ -455,14 +484,18 @@ def test_generator_scan_live_db(tmp_path: Path):
     engine = create_engine(db_url)
     meta = MetaData()
     users = Table(
-        "users", meta,
+        "users",
+        meta,
         Column("id", Integer, primary_key=True),
         Column("email", String(100)),
     )
     meta.create_all(engine)
 
     with engine.connect() as conn:
-        conn.execute(users.insert(), [{"id": 1, "email": "alice@test.com"}, {"id": 2, "email": "bob@test.com"}])
+        conn.execute(
+            users.insert(),
+            [{"id": 1, "email": "alice@test.com"}, {"id": 2, "email": "bob@test.com"}],
+        )
         conn.commit()
 
     generator = ConfigGenerator()
@@ -473,6 +506,7 @@ def test_generator_scan_live_db(tmp_path: Path):
 
 def test_faker_strategy_unsupported_provider():
     from cloakdb.strategies.synthetic import SyntheticFakerStrategy
+
     strat = SyntheticFakerStrategy()
     ctx = TransformationContext(
         table_name="t",

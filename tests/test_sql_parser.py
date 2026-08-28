@@ -331,10 +331,10 @@ def test_postgres_copy_csv_mode_streaming():
     parser = SQLDumpStreamParser()
 
     sql_content = (
-        'COPY users (id, email, name) FROM stdin WITH (FORMAT csv, HEADER false);\n'
+        "COPY users (id, email, name) FROM stdin WITH (FORMAT csv, HEADER false);\n"
         '1,"alice@example.com","Alice, Jr."\n'
         '2,"bob@example.com","Bob"\n'
-        '\\.\n'
+        "\\.\n"
     )
     in_stream = io.StringIO(sql_content)
     out_stream = io.StringIO()
@@ -350,7 +350,11 @@ def test_postgres_dollar_quoted_strings_in_parser():
     config = CloakConfig(
         version="1",
         global_settings=GlobalConfig(salt="test-salt"),
-        tables={"articles": TableRule(columns={"author": ColumnRule(strategy="constant", params={"value_to_set": "Anon"})})},
+        tables={
+            "articles": TableRule(
+                columns={"author": ColumnRule(strategy="constant", params={"value_to_set": "Anon"})}
+            )
+        },
     )
     engine = CloakEngine(config)
     parser = SQLDumpStreamParser()

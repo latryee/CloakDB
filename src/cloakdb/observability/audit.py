@@ -20,7 +20,9 @@ from cloakdb.utils.security import redact_connection_url
 
 def _canonical_json_bytes(data: dict[str, Any]) -> bytes:
     """Serializes a dictionary to canonical deterministic JSON bytes."""
-    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "utf-8"
+    )
 
 
 def _compute_config_hash(config: CloakConfig, config_path: str | Path | None = None) -> str:
@@ -46,7 +48,9 @@ class AuditTrailManager:
         actor: str | None = None,
     ) -> dict[str, Any]:
         """Generates a cryptographically signed audit log record."""
-        current_user = actor or os.getenv("CLOAKDB_ACTOR") or os.getenv("USER") or os.getenv("USERNAME")
+        current_user = (
+            actor or os.getenv("CLOAKDB_ACTOR") or os.getenv("USER") or os.getenv("USERNAME")
+        )
         if not current_user:
             try:
                 current_user = getpass.getuser()
@@ -54,7 +58,9 @@ class AuditTrailManager:
                 current_user = "anonymous"
 
         effective_key = signer_key or config.global_settings.salt or "cloakdb-audit-key"
-        key_bytes = effective_key.encode("utf-8") if isinstance(effective_key, str) else effective_key
+        key_bytes = (
+            effective_key.encode("utf-8") if isinstance(effective_key, str) else effective_key
+        )
 
         timestamp_iso = datetime.now(timezone.utc).isoformat()
         cfg_hash = _compute_config_hash(config, config_path)
@@ -66,9 +72,12 @@ class AuditTrailManager:
             "actor": current_user,
             "host": platform.node(),
             "config_hash_sha256": cfg_hash,
-            "salt_fingerprint": config.global_settings.salt_fingerprint or config.global_settings.compute_fingerprint(),
+            "salt_fingerprint": config.global_settings.salt_fingerprint
+            or config.global_settings.compute_fingerprint(),
             "input_target": redact_connection_url(str(input_target)),
-            "output_target": redact_connection_url(str(output_target)) if output_target else "[Live In-Place / Stdout]",
+            "output_target": redact_connection_url(str(output_target))
+            if output_target
+            else "[Live In-Place / Stdout]",
             "metrics": {
                 "tables_processed": stats.tables_processed,
                 "rows_processed": stats.rows_processed,
@@ -131,9 +140,15 @@ class AuditTrailManager:
         computed_sig = hmac.new(key_bytes, canonical_bytes, hashlib.sha256).hexdigest()
 
         if hmac.compare_digest(expected_sig, computed_sig):
-            return True, f"Audit trail verified! Signed by valid key on {payload.get('timestamp')} for actor '{payload.get('actor')}'."
+            return (
+                True,
+                f"Audit trail verified! Signed by valid key on {payload.get('timestamp')} for actor '{payload.get('actor')}'.",
+            )
         else:
-            return False, "Cryptographic verification FAILED: Signature mismatch! Audit log has been tampered with or key is incorrect."
+            return (
+                False,
+                "Cryptographic verification FAILED: Signature mismatch! Audit log has been tampered with or key is incorrect.",
+            )
 
 
 generate_audit_log = AuditTrailManager.generate_audit_log

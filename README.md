@@ -326,6 +326,7 @@ from cloakdb.core.context import TransformationContext
 from cloakdb.strategies.base import MaskingStrategy
 from cloakdb.strategies.registry import register_strategy
 
+
 @register_strategy("custom_aes_vault")
 class CustomVaultStrategy(MaskingStrategy):
     description = "Encrypts data via external Hardware Security Module (HSM)"
