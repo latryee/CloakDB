@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Deterministic database & SQL dump anonymization CLI"
 readme = "README.md"
 authors = [
-    { name = "latryee", email = "sariyarberkay@gmail.com" }
+    { name = "latryee", email = "latryee@users.noreply.github.com" }
 ]
 license = { text = "MIT" }
 requires-python = ">=3.10"

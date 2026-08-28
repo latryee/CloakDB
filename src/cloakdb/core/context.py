@@ -46,6 +46,7 @@ class TransformationContext:
     group_name: str | None = None
     stats: MaskingStats = field(default_factory=MaskingStats)
     custom_state: dict[str, Any] = field(default_factory=dict)
+    integrity_manager: Any | None = None
 
     def derive_seed(self, value: Any = None, scope: str | None = None) -> int:
         """Derives a deterministic 64-bit integer seed.

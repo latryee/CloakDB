@@ -96,7 +96,7 @@ INSERT INTO public.orders (id, user_id, order_total, shipping_address, customer_
 
 CloakDB uses a deterministic seed-derivation model to maintain data consistency:
 
-- **`deterministic_hash`**: Pseudonyms are derived directly from `HMAC-SHA256(salt, raw_value)`. Under the same configuration and salt, identical input values will produce identical pseudonyms across any table and column name.
+- **`deterministic_hash`**: Pseudonyms are derived directly from `HMAC-SHA256(salt, raw_value)`. Under the same configuration and salt, identical input values will produce identical pseudonyms across any table and column name. For integer outputs (`as_integer: true`), deterministic rejection sampling with reverse-lookup tracking ensures collision-free mappings even in constrained numeric ranges.
 - **Un-grouped Synthetic Strategies (`faker`)**: By default, synthetic transformations are column-scoped (`seed = hash(salt, table_name, column_name, raw_value)`). This prevents two unrelated columns from generating identical synthetic names purely by coincidence.
 - **`ConsistencyGroup`**: Groups multiple columns across tables (e.g. `users.id` and `orders.user_id`, or `users.email` and `audit_logs.actor_email`) under a shared seed scope (`seed = hash(salt, group_name, raw_value)`). This guarantees identical synthetic and hashed values across tables and column names.
 - **Cache Independence**: An in-memory LRU cache accelerates repeated lookups to $O(1)$. However, consistency correctness does **not** rely on cache retention: even if an entry is evicted under high volume, recomputing the value derives the exact same mathematical output.
@@ -298,7 +298,7 @@ tables:
 | Strategy | Parameters | Sample Original | Masked Replacement |
 | :--- | :--- | :--- | :--- |
 | `json_mask` | `rules: {'path': rule}` | `{"user": {"email": "a@b.com"}}` | `{"user": {"email": "masked@b.com"}}` |
-| `deterministic_hash` | `as_integer: true, min_int: 10000` | `1048` | `84920` *(Preserved across tables)* |
+| `deterministic_hash` | `as_integer: true, min_int: 10000` | `1048` | `84920` *(Preserved across tables, collision-free via rejection sampling)* |
 | `uuid_hash` | `salt: 'secret'` | `user-12345` | `e0a3f8c2-...` *(RFC 4122 v5 UUID)* |
 | `faker` | `provider: 'email', preserve_domain: true` | `john.doe@company.org` | `jwoodard@company.org` |
 | `faker` | `provider: 'name'` | `Eleanor Vance` | `Bradley Wagner` |

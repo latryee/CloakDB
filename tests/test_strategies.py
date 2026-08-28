@@ -50,6 +50,34 @@ def test_deterministic_hash_integer(base_context: TransformationContext):
     assert out1 == out2
 
 
+def test_deterministic_hash_integer_collision_free_rejection_sampling(
+    base_context: TransformationContext,
+):
+    """Pseudonymizes 50,000 unique integers with a small range and asserts zero collisions."""
+    strat = StrategyRegistry.get("deterministic_hash")
+    count = 50_000
+    min_val = 100_000
+    max_val = 200_000
+
+    masked_values = [
+        strat.transform(i, base_context, as_integer=True, min_int=min_val, max_int=max_val)
+        for i in range(1, count + 1)
+    ]
+
+    assert len(masked_values) == count
+    assert len(set(masked_values)) == count, (
+        "Zero collisions expected across 50,000 pseudonymized integers"
+    )
+    assert all(min_val <= v <= max_val for v in masked_values)
+
+    # Assert determinism and caching on repeat calls
+    for i in range(1, 100):
+        re_masked = strat.transform(
+            i, base_context, as_integer=True, min_int=min_val, max_int=max_val
+        )
+        assert re_masked == masked_values[i - 1]
+
+
 def test_uuid_hash_strategy(base_context: TransformationContext):
     strat = StrategyRegistry.get("uuid_hash")
     uuid1 = strat.transform("user-12345", base_context)

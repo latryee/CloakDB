@@ -237,6 +237,7 @@ class CloakEngine:
             locale=self.config.global_settings.locale,
             group_name=group_name,
             stats=self.stats,
+            integrity_manager=self.integrity_manager,
         )
 
         masked_value = strategy.transform(value, ctx, **strategy_params)

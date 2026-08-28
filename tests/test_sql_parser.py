@@ -236,6 +236,40 @@ def test_sql_parser_multiline_string_with_newlines():
     assert engine.stats.rows_processed == 2
 
 
+def test_sql_parser_semicolon_and_escaped_single_quotes():
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    sql_path = fixtures_dir / "semicolon_and_escaped_quote.sql"
+    sql_content = sql_path.read_text(encoding="utf-8")
+
+    config = CloakConfig(
+        version="1",
+        global_settings=GlobalConfig(salt="sql-test-salt"),
+        tables={
+            "comments": TableRule(
+                columns={
+                    "author_email": ColumnRule(strategy="email_mask"),
+                }
+            )
+        },
+    )
+    engine = CloakEngine(config)
+    parser = SQLDumpStreamParser()
+
+    in_stream = io.StringIO(sql_content)
+    out_stream = io.StringIO()
+    parser.process_stream(in_stream, out_stream, engine)
+
+    output = out_stream.getvalue()
+    # All rows must be processed without premature splitting on embedded semicolons
+    assert "alice@example.com" not in output
+    assert "bob@example.com" not in output
+    assert "carol@example.com" not in output
+    assert "It''s a great feature; highly recommended!" in output
+    assert "Customer''s feedback; status: resolved; notes: don''t forget follow-up." in output
+    assert "Final note; let''s verify." in output
+    assert engine.stats.rows_processed == 3
+
+
 def test_csv_and_json_stream_parser_tracks_bytes():
     config = CloakConfig(
         version="1",

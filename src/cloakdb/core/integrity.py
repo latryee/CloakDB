@@ -58,6 +58,8 @@ class ReferentialIntegrityManager:
         self._group_definitions: dict[str, ConsistencyGroup] = {}
         # Map group_name -> LRUCache
         self._group_caches: dict[str, LRUCache] = {}
+        # Map group_name -> reverse lookup dict (masked_value -> raw_value)
+        self._reverse_lookups: dict[str, dict[Any, Any]] = {}
 
         self._initialize_groups()
 
@@ -65,6 +67,7 @@ class ReferentialIntegrityManager:
         for group in self.groups:
             self._group_definitions[group.name] = group
             self._group_caches[group.name] = LRUCache(self.max_cache_size)
+            self._reverse_lookups[group.name] = {}
             for col_ref in group.columns:
                 normalized = self._normalize_column_ref(col_ref)
                 self._column_to_group[normalized] = group.name
@@ -87,13 +90,59 @@ class ReferentialIntegrityManager:
             return None
         cache = self._group_caches.get(group_name)
         if cache:
-            return cache.get(raw_value)
+            val = cache.get(raw_value)
+            if val is not None:
+                return val
+            if isinstance(raw_value, (int, float)):
+                val = cache.get(str(raw_value))
+                if val is not None:
+                    return val
+            elif isinstance(raw_value, str):
+                try:
+                    if raw_value.isdigit() or (
+                        raw_value.startswith("-") and raw_value[1:].isdigit()
+                    ):
+                        val = cache.get(int(raw_value))
+                        if val is not None:
+                            return val
+                except Exception:
+                    pass
         return None
 
     def store_cached_value(self, group_name: str, raw_value: Any, masked_value: Any) -> None:
-        """Stores a computed pseudonym in the group cache."""
+        """Stores a computed pseudonym in the group cache and reverse lookup mapping."""
         if not self.cache_enabled:
             return
         if group_name not in self._group_caches:
             self._group_caches[group_name] = LRUCache(self.max_cache_size)
+        if group_name not in self._reverse_lookups:
+            self._reverse_lookups[group_name] = {}
         self._group_caches[group_name].set(raw_value, masked_value)
+        self._reverse_lookups[group_name][masked_value] = raw_value
+
+    def is_collision(self, group_name: str, raw_value: Any, masked_value: Any) -> bool:
+        """Checks if masked_value is already claimed by a different raw_value in this group."""
+        if not self.cache_enabled:
+            return False
+        rev = self._reverse_lookups.get(group_name)
+        if rev is None:
+            return False
+        existing_raw = rev.get(masked_value)
+        if existing_raw is None:
+            return False
+        if existing_raw == raw_value or str(existing_raw) == str(raw_value):
+            return False
+        return True
+
+    def get_raw_for_masked(self, group_name: str, masked_value: Any) -> Any | None:
+        """Retrieves the raw value associated with a masked value in a group."""
+        rev = self._reverse_lookups.get(group_name)
+        if rev is not None:
+            return rev.get(masked_value)
+        return None
+
+    def get_reverse_lookup(self, group_name: str) -> dict[Any, Any]:
+        """Returns the reverse lookup mapping (masked_value -> raw_value) for a group."""
+        if group_name not in self._reverse_lookups:
+            self._reverse_lookups[group_name] = {}
+        return self._reverse_lookups[group_name]

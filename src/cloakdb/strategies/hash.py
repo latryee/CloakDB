@@ -38,14 +38,52 @@ class DeterministicHashStrategy(MaskingStrategy):
             return None
 
         effective_salt = salt or context.salt
-        val_str = str(value).encode("utf-8")
-        h = hmac.new(effective_salt.encode("utf-8"), val_str, hashlib.sha256).digest()
+        group_key = context.group_name or f"{context.table_name}.{context.column_name}"
+
+        # Resolve integrity manager for collision detection & caching
+        integrity_mgr = getattr(context, "integrity_manager", None)
+        if integrity_mgr is None:
+            if "_integrity_mgr" not in context.custom_state:
+                from cloakdb.core.integrity import ReferentialIntegrityManager
+
+                context.custom_state["_integrity_mgr"] = ReferentialIntegrityManager()
+            integrity_mgr = context.custom_state["_integrity_mgr"]
+
+        # Check existing cached mapping first
+        if integrity_mgr is not None:
+            cached = integrity_mgr.get_cached_value(group_key, value)
+            if cached is not None:
+                return cached
 
         if as_integer or isinstance(value, int):
-            num = int.from_bytes(h[:8], "big")
             span = max_int - min_int + 1
-            res_int = min_int + (num % span)
-            return res_int
+            if span <= 0:
+                raise ValueError(f"Invalid integer range: min_int={min_int} > max_int={max_int}")
+
+            counter = 0
+            while True:
+                if counter == 0:
+                    hmac_input = str(value).encode("utf-8")
+                else:
+                    hmac_input = f"{value}:{counter}".encode()
+
+                h = hmac.new(effective_salt.encode("utf-8"), hmac_input, hashlib.sha256).digest()
+                num = int.from_bytes(h[:8], "big")
+                res_int = min_int + (num % span)
+
+                if integrity_mgr is not None:
+                    if integrity_mgr.is_collision(group_key, value, res_int):
+                        counter += 1
+                        if counter > span:
+                            raise ValueError(
+                                f"Integer space exhausted in range [{min_int}, {max_int}] for group '{group_key}'"
+                            )
+                        continue
+                    integrity_mgr.store_cached_value(group_key, value, res_int)
+                return res_int
+
+        val_str = str(value).encode("utf-8")
+        h = hmac.new(effective_salt.encode("utf-8"), val_str, hashlib.sha256).digest()
 
         if output_format == "hex":
             digest_str = h.hex()[:length]
@@ -56,7 +94,10 @@ class DeterministicHashStrategy(MaskingStrategy):
         else:
             digest_str = h.hex()[:length]
 
-        return f"{prefix}{digest_str}{suffix}"
+        masked_val = f"{prefix}{digest_str}{suffix}"
+        if integrity_mgr is not None:
+            integrity_mgr.store_cached_value(group_key, value, masked_val)
+        return masked_val
 
 
 @register_strategy("uuid_hash", aliases=["uuid"])
