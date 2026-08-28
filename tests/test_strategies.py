@@ -104,6 +104,45 @@ def test_faker_email_preserve_domain(base_context: TransformationContext):
     assert not masked.startswith("ceo@")
 
 
+def test_faker_does_not_mutate_global_random_state(base_context: TransformationContext):
+    import random
+
+    strat = StrategyRegistry.get("faker")
+    random.seed(999999)
+    state_before = random.getstate()
+
+    _ = strat.transform("test_val_1", base_context, provider="name", deterministic=True)
+    _ = strat.transform("test_val_2", base_context, provider="email", deterministic=True)
+    _ = strat.transform("test_val_3", base_context, provider="address", deterministic=True)
+
+    state_after = random.getstate()
+    assert state_before == state_after, "Faker strategy must not mutate Python's global random state"
+
+
+def test_faker_multithreaded_concurrency(base_context: TransformationContext):
+    import concurrent.futures
+
+    strat = StrategyRegistry.get("faker")
+    test_values = [f"user_{i}@example.com" for i in range(50)]
+
+    expected = {
+        val: strat.transform(val, base_context, provider="name", deterministic=True)
+        for val in test_values
+    }
+
+    def _transform_val(val: str) -> tuple[str, str]:
+        res = strat.transform(val, base_context, provider="name", deterministic=True)
+        return val, res
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(_transform_val, val) for val in test_values * 5]
+        for f in concurrent.futures.as_completed(futures):
+            val, res = f.result()
+            assert res == expected[val], (
+                f"Thread race condition detected for value {val}: expected {expected[val]}, got {res}"
+            )
+
+
 def test_pattern_mask(base_context: TransformationContext):
     strat = StrategyRegistry.get("pattern_mask")
     masked = strat.transform("123456789", base_context, keep_first=2, keep_last=2, mask_char="*")
