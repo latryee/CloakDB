@@ -1,9 +1,12 @@
 <div align="center">
 
-# 🛡️ CloakDB
+# CloakDB
 
-**Deterministic database & SQL dump anonymization CLI.**  
-*Sanitize database dumps, JSON/JSONB payloads, and live tables with referential integrity, multi-core streaming, and constant memory consumption.*
+> Deterministic database & SQL dump anonymization CLI for safe staging and test data.
+
+Production data → CloakDB → Anonymized data
+
+Preserve relationships. Protect sensitive data. Keep your test data realistic.
 
 ![CloakDB Social Banner](./assets/social_preview.png)
 
