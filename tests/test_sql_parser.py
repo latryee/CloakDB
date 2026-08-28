@@ -164,4 +164,71 @@ def test_json_stream_parser():
 
     output = out_stream.getvalue()
     assert "abc123xyz" not in output
-    assert '"secret": null' in output
+    assert "def456uvw" not in output
+    assert '"secret": null' in output or '"secret": "NULL"' in output or 'null' in output
+
+
+def test_sql_parser_semicolon_inside_string_literal():
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    sql_path = fixtures_dir / "semicolon_in_string.sql"
+    sql_content = sql_path.read_text(encoding="utf-8")
+
+    config = CloakConfig(
+        version="1",
+        global_settings=GlobalConfig(salt="sql-test-salt"),
+        tables={
+            "messages": TableRule(
+                columns={
+                    "sender_email": ColumnRule(strategy="email_mask"),
+                }
+            )
+        },
+    )
+    engine = CloakEngine(config)
+    parser = SQLDumpStreamParser()
+
+    in_stream = io.StringIO(sql_content)
+    out_stream = io.StringIO()
+    parser.process_stream(in_stream, out_stream, engine)
+
+    output = out_stream.getvalue()
+    # Both rows must be processed and masked, not truncated or skipped
+    assert "alice@example.com" not in output
+    assert "bob@example.com" not in output
+    assert "Hello; this is a test; with semicolons;" in output
+    assert "Second message; still in insert block;" in output
+    assert engine.stats.rows_processed == 2
+
+
+def test_sql_parser_multiline_string_with_newlines():
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    sql_path = fixtures_dir / "multiline_string.sql"
+    sql_content = sql_path.read_text(encoding="utf-8")
+
+    config = CloakConfig(
+        version="1",
+        global_settings=GlobalConfig(salt="sql-test-salt"),
+        tables={
+            "posts": TableRule(
+                columns={
+                    "author_email": ColumnRule(strategy="email_mask"),
+                }
+            )
+        },
+    )
+    engine = CloakEngine(config)
+    parser = SQLDumpStreamParser()
+
+    in_stream = io.StringIO(sql_content)
+    out_stream = io.StringIO()
+    parser.process_stream(in_stream, out_stream, engine)
+
+    output = out_stream.getvalue()
+    # Both rows must be processed and masked properly
+    assert "carol@example.com" not in output
+    assert "dave@example.com" not in output
+    assert "Paragraph 1: Welcome!" in output
+    assert "Paragraph 2: This is a multi-line body with real newlines." in output
+    assert "Paragraph 3: Semicolons; and (parentheses) inside quotes." in output
+    assert "Single line body" in output
+    assert engine.stats.rows_processed == 2

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 
 def redact_connection_url(url: str) -> str:
     """Masks the password portion of userinfo in database connection URLs.

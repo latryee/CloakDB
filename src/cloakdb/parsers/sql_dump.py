@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import IO, Any
 
 from cloakdb.core.engine import CloakEngine
@@ -62,6 +63,21 @@ def _parse_sql_value(raw: str) -> Any:
         return raw
 
 
+@dataclass
+class InsertBlockState:
+    """Carries in-progress parsing and quote-tracking state across physical lines."""
+
+    table_name: str
+    column_names: list[str]
+    truncate: bool
+    buffer: str = ""
+    in_quote: bool = False
+    quote_char: str = ""
+    is_escaped: bool = False
+    paren_depth: int = 0
+    tuple_start: int | None = None
+
+
 def _format_sql_value(val: Any) -> str:
     if val is None:
         return "NULL"
@@ -70,7 +86,7 @@ def _format_sql_value(val: Any) -> str:
     if isinstance(val, (int, float)):
         return str(val)
     # String formatting with proper SQL escaping
-    s = str(val).replace("\\", "\\\\").replace("'", "''").replace("\n", "\\n").replace("\r", "\\r")
+    s = str(val).replace("\\", "\\\\").replace("'", "''")
     return f"'{s}'"
 
 
@@ -197,11 +213,7 @@ class SQLDumpStreamParser(BaseStreamParser):
         copy_columns: list[str] = []
         copy_truncate = False
 
-        in_insert_mode = False
-        insert_table = ""
-        insert_columns: list[str] = []
-        insert_truncate = False
-
+        insert_state: InsertBlockState | None = None
         row_count = 0
         bytes_count = 0
 
@@ -278,29 +290,18 @@ class SQLDumpStreamParser(BaseStreamParser):
                 continue
 
             # 3. Handle multi-line continuing INSERT mode
-            if in_insert_mode:
-                if insert_truncate:
-                    if ";" in line:
-                        in_insert_mode = False
-                    continue
-
-                tuples = _split_multiple_tuples(line)
-                if tuples:
-                    new_line = self._mask_tuples_in_string(
-                        raw_str=line,
-                        tuples=tuples,
-                        table_name=insert_table,
-                        column_names=insert_columns,
-                        engine=engine,
-                        row_start_index=row_count,
-                    )
-                    row_count += len(tuples)
-                    output_stream.write(new_line)
-                else:
-                    output_stream.write(line)
-
-                if ";" in line:
-                    in_insert_mode = False
+            if insert_state is not None:
+                insert_state.buffer += line
+                done, count = self._process_insert_buffer(
+                    insert_state, engine, output_stream, row_count
+                )
+                row_count += count
+                if progress_callback and row_count % 500 == 0:
+                    progress_callback(500, bytes_count)
+                if done:
+                    if not insert_state.truncate and insert_state.buffer:
+                        output_stream.write(insert_state.buffer)
+                    insert_state = None
                 continue
 
             # 4. Check for start of INSERT INTO statement
@@ -318,76 +319,137 @@ class SQLDumpStreamParser(BaseStreamParser):
                         list(tbl_rule.columns.keys()) if (tbl_rule and tbl_rule.columns) else []
                     )
 
-                insert_table = tbl_name
-                insert_columns = col_names
-
-                if insert_truncate:
-                    if ";" not in line:
-                        in_insert_mode = True
-                    continue
-
                 prefix_len = insert_match.end()
                 header = line[:prefix_len]
                 rest = line[prefix_len:]
 
-                tuples = _split_multiple_tuples(rest)
-                if tuples:
-                    masked_rest = self._mask_tuples_in_string(
-                        raw_str=rest,
-                        tuples=tuples,
-                        table_name=tbl_name,
-                        column_names=col_names,
-                        engine=engine,
-                        row_start_index=row_count,
-                    )
-                    row_count += len(tuples)
-                    output_stream.write(f"{header}{masked_rest}")
-                else:
-                    output_stream.write(line)
+                if not insert_truncate:
+                    output_stream.write(header)
 
-                if ";" not in line:
-                    in_insert_mode = True
+                insert_state = InsertBlockState(
+                    table_name=tbl_name,
+                    column_names=col_names,
+                    truncate=insert_truncate,
+                    buffer=rest,
+                )
+
+                done, count = self._process_insert_buffer(
+                    insert_state, engine, output_stream, row_count
+                )
+                row_count += count
+                if progress_callback and row_count % 500 == 0:
+                    progress_callback(500, bytes_count)
+                if done:
+                    if not insert_state.truncate and insert_state.buffer:
+                        output_stream.write(insert_state.buffer)
+                    insert_state = None
                 continue
 
             # 5. Standard DDL / comment / other line
             output_stream.write(line)
 
+        if insert_state is not None and not insert_state.truncate and insert_state.buffer:
+            output_stream.write(insert_state.buffer)
+
         if progress_callback:
             progress_callback(0, bytes_count)
 
-    def _mask_tuples_in_string(
+    def _process_insert_buffer(
         self,
-        raw_str: str,
-        tuples: list[tuple[int, int, str]],
-        table_name: str,
-        column_names: list[str],
+        state: InsertBlockState,
         engine: CloakEngine,
+        output_stream: IO[str],
         row_start_index: int,
-    ) -> str:
-        """Replaces tuple values in a string segment with their masked equivalents."""
-        out_segments = []
-        last_idx = 0
+    ) -> tuple[bool, int]:
+        """Scans state.buffer, extracts and masks completed tuples, writes output,
 
-        for t_idx, (start, end, tup_str) in enumerate(tuples):
-            out_segments.append(raw_str[last_idx:start])
+        and returns (is_statement_done, count_of_masked_rows).
+        """
+        s = state.buffer
+        n = len(s)
+        i = 0
+        last_flush_idx = 0
+        masked_rows = 0
 
-            raw_val_tokens = _split_sql_values_row(tup_str)
-            row_vals = [_parse_sql_value(tok[2]) for tok in raw_val_tokens]
+        in_quote = False
+        quote_char = ""
+        is_escaped = False
+        paren_depth = 0
+        tuple_start: int | None = None
 
-            if column_names:
-                effective_cols = column_names[: len(row_vals)]
-            else:
-                effective_cols = [f"col_{i}" for i in range(len(row_vals))]
+        while i < n:
+            char = s[i]
 
-            masked_row = engine.mask_row_values(
-                table_name=table_name,
-                column_names=effective_cols,
-                row_values=row_vals,
-                row_index=row_start_index + t_idx,
-            )
-            formatted_row = [_format_sql_value(v) for v in masked_row]
-            out_segments.append(f"({', '.join(formatted_row)})")
-            last_idx = end
+            if is_escaped:
+                is_escaped = False
+                i += 1
+                continue
 
-        out_segments.append(raw_str[last_idx:])
-        return "".join(out_segments)
+            if char == "\\" and in_quote:
+                is_escaped = True
+                i += 1
+                continue
+
+            if char in ("'", '"'):
+                if not in_quote:
+                    in_quote = True
+                    quote_char = char
+                elif quote_char == char:
+                    # Check SQL doubled quote escape '' or ""
+                    if i + 1 < n and s[i + 1] == char:
+                        i += 2
+                        continue
+                    in_quote = False
+                    quote_char = ""
+                i += 1
+                continue
+
+            if not in_quote:
+                if char == "(":
+                    if paren_depth == 0:
+                        tuple_start = i
+                    paren_depth += 1
+                elif char == ")":
+                    paren_depth -= 1
+                    if paren_depth == 0 and tuple_start is not None:
+                        tup_start = tuple_start
+                        tup_end = i + 1
+                        tup_str = s[tup_start:tup_end]
+
+                        if not state.truncate:
+                            output_stream.write(s[last_flush_idx:tup_start])
+
+                            raw_val_tokens = _split_sql_values_row(tup_str)
+                            row_vals = [_parse_sql_value(tok[2]) for tok in raw_val_tokens]
+
+                            if state.column_names:
+                                effective_cols = state.column_names[: len(row_vals)]
+                            else:
+                                effective_cols = [f"col_{c_idx}" for c_idx in range(len(row_vals))]
+
+                            masked_row = engine.mask_row_values(
+                                table_name=state.table_name,
+                                column_names=effective_cols,
+                                row_values=row_vals,
+                                row_index=row_start_index + masked_rows,
+                            )
+                            formatted_row = [_format_sql_value(v) for v in masked_row]
+                            output_stream.write(f"({', '.join(formatted_row)})")
+
+                        masked_rows += 1
+                        last_flush_idx = tup_end
+                        tuple_start = None
+
+                elif char == ";":
+                    # Statement terminator found outside quotes
+                    if not state.truncate:
+                        output_stream.write(s[last_flush_idx : i + 1])
+                    state.buffer = s[i + 1 :]
+                    return True, masked_rows
+
+            i += 1
+
+        if last_flush_idx > 0:
+            state.buffer = s[last_flush_idx:]
+
+        return False, masked_rows
