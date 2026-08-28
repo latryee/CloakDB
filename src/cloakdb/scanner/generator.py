@@ -121,6 +121,32 @@ class ConfigGenerator:
 
         return self._detect_from_samples(table_samples, data_only=data_only)
 
+    def scan_parquet(
+        self, file_path: str | Path, max_rows: int = 100, data_only: bool = False
+    ) -> dict[str, list[PIIDetectionResult]]:
+        """Samples rows from an Apache Parquet file and detects PII."""
+        try:
+            import pyarrow.parquet as pq
+        except ImportError as err:
+            raise ImportError(
+                "Apache Parquet support requires 'pyarrow'. Install with: pip install 'cloakdb[parquet]'"
+            ) from err
+
+        path = Path(file_path)
+        table_name = path.stem
+        pq_file = pq.ParquetFile(str(path))
+        table_samples: dict[str, dict[str, list[Any]]] = {table_name: {}}
+
+        for batch in pq_file.iter_batches(batch_size=max_rows):
+            pydict = batch.to_pydict()
+            for col, vals in pydict.items():
+                if col not in table_samples[table_name]:
+                    table_samples[table_name][col] = []
+                table_samples[table_name][col].extend(vals[:max_rows])
+            break
+
+        return self._detect_from_samples(table_samples, data_only=data_only)
+
     def scan_live_db(
         self, connection_url: str, sample_limit: int = 50, data_only: bool = False
     ) -> dict[str, list[PIIDetectionResult]]:

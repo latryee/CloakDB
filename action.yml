@@ -1,0 +1,71 @@
+name: "CloakDB Masking Action"
+description: "Deterministic, high-performance database & dataset anonymization action with zero-PII leak verification."
+author: "latryee"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  config:
+    description: "Path to cloakdb.yaml masking policy configuration file"
+    required: true
+    default: "cloakdb.yaml"
+  input:
+    description: "Input dataset path (.sql, .csv, .parquet, .jsonl) or connection URL"
+    required: true
+  output:
+    description: "Output masked dataset path (for file streams)"
+    required: false
+  salt:
+    description: "Secret cryptographic salt for deterministic HMAC hashing"
+    required: false
+  workers:
+    description: "Number of parallel worker processes"
+    required: false
+    default: "1"
+  verify:
+    description: "Whether to run zero-PII leak verification audit after masking ('true' or 'false')"
+    required: false
+    default: "true"
+  dry-run:
+    description: "Run masking validation in dry-run mode without modifying output"
+    required: false
+    default: "false"
+
+outputs:
+  masked_path:
+    description: "Path to the masked dataset output"
+    value: ${{ inputs.output }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install CloakDB
+      shell: bash
+      run: |
+        pip install -e "${{ github.action_path }}[all]" || pip install "${{ github.action_path }}"
+
+    - name: Run CloakDB Masking
+      shell: bash
+      env:
+        SECRET_SALT: ${{ inputs.salt }}
+      run: |
+        ARGS=("-c" "${{ inputs.config }}" "-i" "${{ inputs.input }}" "--workers" "${{ inputs.workers }}")
+        if [ -n "${{ inputs.output }}" ]; then
+          ARGS+=("-o" "${{ inputs.output }}")
+        fi
+        if [ "${{ inputs.dry-run }}" = "true" ]; then
+          ARGS+=("--dry-run")
+        fi
+        cloakdb apply "${ARGS[@]}"
+
+    - name: Verify Zero-PII Leak
+      if: ${{ inputs.verify == 'true' && inputs.output != '' }}
+      shell: bash
+      run: |
+        cloakdb verify -i "${{ inputs.output }}"

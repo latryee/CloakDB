@@ -334,6 +334,7 @@ tables:
 
 | Strategy | Parameters | Sample Original | Masked Replacement |
 | :--- | :--- | :--- | :--- |
+| `differential_privacy` | `epsilon: 1.0, sensitivity: 100.0, mechanism: 'laplace'` | `75,000.00` | `74,842.10` *(Calibrated ε-Laplace / (ε, δ)-Gaussian noise)* |
 | `json_mask` | `rules: {'path': rule}` | `{"user": {"email": "a@b.com"}}` | `{"user": {"email": "masked@b.com"}}` |
 | `deterministic_hash` | `as_integer: true, min_int: 10000` | `1048` | `84920` *(Preserved across tables, collision-free via rejection sampling)* |
 | `uuid_hash` | `salt: 'secret'` | `user-12345` | `e0a3f8c2-...` *(RFC 4122 v5 UUID)* |
@@ -352,6 +353,23 @@ tables:
 | `scramble` | `deterministic: true` | `Abc-123` | `Xyk-841` |
 | `regex_replace` | `pattern: '\\d+', replacement: 'XXX'` | `Order #12345` | `Order #XXX` |
 | `choice` | `choices: ['EU', 'US', 'APAC']` | `PRIVATE_REGION` | `EU` |
+
+---
+
+## ⚡ GitHub Actions Integration
+
+Use CloakDB directly in your CI/CD pipelines to sanitize staging dumps and audit for zero-PII leaks:
+
+```yaml
+- name: Anonymize Database Dump
+  uses: latryee/CloakDB@v1
+  with:
+    config: "cloakdb.yaml"
+    input: "dumps/staging_raw.sql"
+    output: "dumps/staging_masked.sql"
+    salt: "${{ secrets.CLOAKDB_SALT }}"
+    verify: "true"  # Automatically asserts 0 PII leak
+```
 
 ---
 

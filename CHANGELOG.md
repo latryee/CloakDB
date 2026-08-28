@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Zero-PII Leak Post-Masking Verification (`cloakdb verify`)**: Audits masked datasets, CSV files, and SQL dumps using data-only multi-layer PII detectors with cryptographic checksums (Luhn Mod-10, TCKN Mod-10/11, IBAN Mod-97) to mathematically assert zero unmasked sensitive values remain.
 
 ### Added
+- **Differential Privacy Strategy (`differential_privacy`)**: Implements provable $\epsilon$-Laplace and $(\epsilon, \delta)$-Gaussian privacy mechanisms with deterministic seeded noise and bounds clamping.
+- **Apache Parquet Streaming Parser (`ParquetStreamParser`)**: Chunked row-group streaming and PII detection for `.parquet` Big Data pipelines using PyArrow without memory blowup.
+- **Reusable GitHub Marketplace Action (`action.yml`)**: Composite Action (`uses: latryee/CloakDB@v1`) enabling one-line database anonymization and verification in CI/CD workflows.
+- **Interactive Configuration Wizard (`cloakdb wizard`)**: Terminal guided setup with automated PII discovery, salt generation, and instant preview.
+- **Automated GHCR & PyPI Container Workflows**: Multi-arch Docker builds to GitHub Container Registry (`ghcr.io/latryee/cloakdb`) and OIDC PyPI publishing on release tags.
 - **Automated Foreign Key Inference (`cloakdb scan --infer-fks`)**: Introspects live database schemas via SQLAlchemy and parses SQL dump DDL (`REFERENCES`, `FOREIGN KEY`, `ALTER TABLE ... ADD CONSTRAINT`) to auto-populate `consistency_groups`.
 - **Composite (Multi-Column) Foreign Key Support**: Native support for composite foreign keys (e.g. `orders.(tenant_id, user_id)` <-> `audit_logs.(tenant_id, user_id)`) ensuring multi-column referential integrity across relational schemas.
 - **Stateless Deterministic Hashing (`--stateless`)**: $O(1)$ memory deterministic mapping without unbounded in-memory cache, enabling infinite streaming on constrained nodes.

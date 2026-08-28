@@ -199,6 +199,8 @@ def scan(
             detections = generator.scan_live_db(target, sample_limit=max_samples)
         elif target.endswith(".csv"):
             detections = generator.scan_csv(target, max_rows=max_samples)
+        elif target.endswith(".parquet"):
+            detections = generator.scan_parquet(target, max_rows=max_samples)
         else:
             detections = generator.scan_sql_dump(target, max_lines=max_samples)
 
@@ -579,6 +581,13 @@ def apply(
             from cloakdb.parsers.json_stream import JSONDocumentStreamParser
 
             parser = JSONDocumentStreamParser(table_name=first_table)
+        elif in_path.suffix.lower() == ".parquet":
+            first_table = list(config.tables.keys())[0] if config.tables else "default"
+            from cloakdb.parsers.parquet_stream import ParquetStreamParser
+
+            parser = ParquetStreamParser(
+                table_name=first_table, batch_size=config.global_settings.batch_size
+            )
         elif workers > 1:
             from cloakdb.parsers.chunking import ParallelStreamParser
 
@@ -724,6 +733,8 @@ def verify(
             detections = generator.scan_live_db(target, sample_limit=max_samples, data_only=True)
         elif target.endswith(".csv"):
             detections = generator.scan_csv(target, max_rows=max_samples, data_only=True)
+        elif target.endswith(".parquet"):
+            detections = generator.scan_parquet(target, max_rows=max_samples, data_only=True)
         else:
             detections = generator.scan_sql_dump(target, max_lines=max_samples, data_only=True)
 
@@ -895,6 +906,80 @@ def diff(
     console.print(
         f"Summary: [bold cyan]{total_comparisons}[/bold cyan] masked cell(s) compared, "
         f"[bold yellow]{diff_count}[/bold yellow] differing value(s) between configs.\n"
+    )
+
+
+@app.command()
+def wizard(
+    output_config: str = typer.Option(
+        "cloakdb.yaml", "--output", "-o", help="Target configuration file path"
+    ),
+    locale: str = typer.Option("en_US", "--locale", "-l", help="Default Faker locale"),
+) -> None:
+    """Interactive guided wizard for generating a production CloakDB configuration."""
+    console.print()
+    console.print(
+        Panel(
+            "[bold cyan]Welcome to the CloakDB Configuration Wizard[/bold cyan]\n\n"
+            "This wizard will guide you through connecting your dataset, auto-detecting PII,\n"
+            "generating cryptographically strong salts, and configuring masking rules.",
+            title="[bold magenta]CloakDB Wizard[/bold magenta]",
+            border_style="magenta",
+        )
+    )
+
+    target_input = typer.prompt(
+        "Enter input file path (.sql, .csv, .parquet, .jsonl) or Database URL",
+        default="dump.sql",
+    )
+
+    salt_val = secrets.token_hex(32)
+    console.print(
+        f"\n[+] Generated cryptographically strong salt (64 hex chars):\n    [cyan]{salt_val}[/cyan]\n"
+    )
+
+    generator = ConfigGenerator()
+    console.print("[bold yellow]Scanning target dataset for PII...[/bold yellow]")
+
+    if "://" in target_input:
+        detections = generator.scan_live_db(target_input)
+    elif target_input.endswith(".csv") and Path(target_input).exists():
+        detections = generator.scan_csv(target_input)
+    elif target_input.endswith(".parquet") and Path(target_input).exists():
+        detections = generator.scan_parquet(target_input)
+    elif target_input.endswith(".sql") and Path(target_input).exists():
+        detections = generator.scan_sql_dump(target_input)
+    else:
+        detections = {}
+
+    config = generator.generate_config_from_detections(
+        detections,
+        locale=locale,
+        target=target_input
+        if (
+            "://" in target_input or (target_input.endswith(".sql") and Path(target_input).exists())
+        )
+        else None,
+        infer_fks=True,
+    )
+    config.global_settings.salt = salt_val
+    config.global_settings.salt_fingerprint = config.global_settings.compute_fingerprint()
+
+    out_p = Path(output_config)
+    save_config(config, out_p)
+
+    console.print(
+        Panel(
+            f"[bold green]SUCCESS![/bold green] CloakDB configuration successfully generated!\n\n"
+            f"Saved to: [bold white]{out_p.resolve()}[/bold white]\n"
+            f"Tables configured: [cyan]{len(config.tables)}[/cyan]\n"
+            f"Consistency groups: [cyan]{len(config.consistency_groups)}[/cyan]\n\n"
+            "Next steps:\n"
+            f"1. Test in dry-run mode: [bold white]cloakdb apply -c {output_config} -i {target_input} --dry-run[/bold white]\n"
+            f"2. Apply masking:        [bold white]cloakdb apply -c {output_config} -i {target_input} -o sanitized_output[/bold white]",
+            title="[bold green]Configuration Ready[/bold green]",
+            border_style="green",
+        )
     )
 
 
