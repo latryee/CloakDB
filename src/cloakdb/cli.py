@@ -612,20 +612,35 @@ def apply(
                     description=f"Processed [bold green]{engine.stats.rows_processed:,}[/bold green] rows ({engine.stats.mb_per_second:.1f} MB/s)...",
                 )
 
-            with in_path.open("r", encoding="utf-8", errors="replace") as in_stream:
+            if in_path.suffix.lower() == ".parquet":
                 if dry_run or not out_path:
                     import io
 
-                    null_out = io.StringIO()
-                    parser.process_stream(
-                        in_stream, null_out, engine, progress_callback=_on_progress
-                    )
+                    null_out = io.BytesIO()
+                    with in_path.open("rb") as in_stream:
+                        parser.process_stream(
+                            in_stream, null_out, engine, progress_callback=_on_progress
+                        )
                 else:
                     out_path.parent.mkdir(parents=True, exist_ok=True)
-                    with out_path.open("w", encoding="utf-8", newline="") as out_stream:
+                    parser.process_file_chunked(
+                        in_path, out_path, engine, progress_callback=_on_progress
+                    )
+            else:
+                with in_path.open("r", encoding="utf-8", errors="replace") as in_stream:
+                    if dry_run or not out_path:
+                        import io
+
+                        null_out = io.StringIO()
                         parser.process_stream(
-                            in_stream, out_stream, engine, progress_callback=_on_progress
+                            in_stream, null_out, engine, progress_callback=_on_progress
                         )
+                    else:
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        with out_path.open("w", encoding="utf-8", newline="") as out_stream:
+                            parser.process_stream(
+                                in_stream, out_stream, engine, progress_callback=_on_progress
+                            )
 
     duration = max(0.001, time.perf_counter() - start_time)
     stats = engine.finish()

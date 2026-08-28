@@ -76,7 +76,10 @@ class ParquetStreamParser(BaseStreamParser):
             writer.close()
 
         out_bytes = out_buf.getvalue()
-        output_stream.write(out_bytes.decode("latin1"))
+        try:
+            output_stream.write(out_bytes)  # type: ignore[arg-type]
+        except TypeError:
+            output_stream.write(out_bytes.decode("latin1"))
 
     def process_file_chunked(
         self,
