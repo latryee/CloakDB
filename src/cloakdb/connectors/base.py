@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from cloakdb.core.engine import CloakEngine
+if TYPE_CHECKING:
+    from cloakdb.core.engine import CloakEngine
 
 
 class BaseDatabaseConnector(ABC):

@@ -20,6 +20,8 @@ from cloakdb.config.loader import load_config, save_config
 from cloakdb.config.models import CloakConfig, ColumnRule, GlobalConfig, TableRule
 from cloakdb.connectors.live_db import LiveDatabaseConnector
 from cloakdb.core.engine import CloakEngine
+from cloakdb.core.metrics import evaluate_privacy_metrics, load_records_from_file
+from cloakdb.core.subset import RelationalSubsettingEngine
 from cloakdb.observability.audit import generate_audit_log, verify_audit_log
 from cloakdb.observability.telemetry import CloakTelemetry, setup_structured_logging
 from cloakdb.parsers.csv_stream import CSVStreamParser
@@ -28,6 +30,12 @@ from cloakdb.parsers.sql_dump import SQLDumpStreamParser
 from cloakdb.scanner.generator import ConfigGenerator
 from cloakdb.strategies.registry import StrategyRegistry
 from cloakdb.utils.benchmark import run_benchmark
+from cloakdb.utils.github import (
+    emit_annotation,
+    format_masking_summary,
+    format_verification_summary,
+    write_step_summary,
+)
 from cloakdb.utils.logger import console, err_console
 from cloakdb.utils.security import (
     compute_salt_fingerprint,
@@ -660,6 +668,9 @@ def _run_masking(
             f"[bold green][+] Tamper-evident SOC2 audit trail saved to:[/bold green] [bold white]{audit_p.resolve()}[/bold white]"
         )
 
+    # Publish GitHub Actions step summary if running in CI
+    write_step_summary(format_masking_summary(stats, input_target, output_target, dry_run=dry_run))
+
     # Securely wipe internal state and memory
     zeroize_memory(engine)
 
@@ -909,6 +920,11 @@ def lint(
         table.add_column("Confidence", justify="right", style="green")
 
         for tbl, col, pii_type, conf in unmapped_sensitive_cols:
+            emit_annotation(
+                f"Schema drift: Column '{col}' in table '{tbl}' contains unmapped sensitive PII [{pii_type}] (conf: {int(conf * 100)}%)",
+                title=f"Schema Drift: {tbl}.{col}",
+                level="error",
+            )
             table.add_row(tbl, col, pii_type, f"{int(conf * 100)}%")
 
         console.print()
@@ -1095,6 +1111,8 @@ def verify(
 
         progress.remove_task(task)
 
+    write_step_summary(format_verification_summary(detections, target))
+
     if not detections:
         console.print()
         console.print(
@@ -1123,6 +1141,11 @@ def verify(
 
     for tbl_name, results in detections.items():
         for res in results:
+            emit_annotation(
+                f"Unmasked PII [{res.pii_type}] in {tbl_name}.{res.column_name} (conf: {int(res.confidence * 100)}%)",
+                title=f"PII Leak: {tbl_name}.{res.column_name}",
+                level="error",
+            )
             samples_str = ", ".join(res.sample_matches[:2])
             conf_str = f"{int(res.confidence * 100)}%"
             table.add_row(
@@ -1145,6 +1168,254 @@ def verify(
         )
     )
     raise typer.Exit(1)
+
+
+@app.command()
+def evaluate(
+    target: str = typer.Option(
+        ...,
+        "--input",
+        "-i",
+        help="Path to dataset (.csv, .json, .jsonl, .parquet) to evaluate",
+    ),
+    qi: str = typer.Option(
+        ...,
+        "--qi",
+        "-q",
+        help="Comma-separated list of quasi-identifier column names (e.g. 'age,zip_code,gender')",
+    ),
+    sensitive: str | None = typer.Option(
+        None,
+        "--sensitive",
+        "-s",
+        help="Optional sensitive attribute column for l-diversity calculation (e.g. 'diagnosis')",
+    ),
+    threshold_k: int = typer.Option(
+        5,
+        "--k",
+        "-k",
+        help="Minimum required k-anonymity compliance threshold",
+    ),
+    threshold_l: int = typer.Option(
+        2,
+        "--l",
+        "-l",
+        help="Minimum required l-diversity compliance threshold",
+    ),
+    limit: int | None = typer.Option(
+        None,
+        "--limit",
+        "-n",
+        help="Maximum sample rows to inspect",
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Output evaluation results as JSON",
+    ),
+) -> None:
+    """Evaluate mathematical privacy metrics: k-anonymity, l-diversity, and re-identification risk."""
+    qi_columns = [col.strip() for col in qi.split(",") if col.strip()]
+    if not qi_columns:
+        err_console.print(
+            "[bold red]Error:[/bold red] At least one quasi-identifier column must be provided."
+        )
+        raise typer.Exit(1)
+
+    try:
+        records = load_records_from_file(target, limit=limit)
+    except Exception as e:
+        err_console.print(f"[bold red]Error loading dataset:[/bold red] {e}")
+        raise typer.Exit(1) from e
+
+    if not records:
+        err_console.print("[bold yellow]Dataset is empty or contains no records.[/bold yellow]")
+        raise typer.Exit(1)
+
+    results = evaluate_privacy_metrics(
+        records=records,
+        quasi_identifiers=qi_columns,
+        sensitive_attribute=sensitive,
+        threshold_k=threshold_k,
+        threshold_l=threshold_l,
+    )
+
+    if as_json:
+        console.print(json.dumps(results.to_dict(), indent=2))
+        if not results.is_compliant:
+            raise typer.Exit(1)
+        return
+
+    table = Table(
+        title="[bold cyan]Mathematical Privacy Evaluation Report[/bold cyan]", box=box.ROUNDED
+    )
+    table.add_column("Metric", style="bold white")
+    table.add_column("Value", style="bold cyan")
+    table.add_column("Threshold / Target", style="dim")
+    table.add_column("Status", style="bold")
+
+    k_status = (
+        "[bold green]PASS[/bold green]"
+        if results.k_anonymity >= threshold_k
+        else "[bold red]FAIL[/bold red]"
+    )
+    table.add_row("Dataset Total Records", f"{results.total_records:,}", "-", "")
+    table.add_row("Quasi-Identifiers", ", ".join(results.quasi_identifiers), "-", "")
+    table.add_row("Equivalence Classes", f"{results.num_equivalence_classes:,}", "-", "")
+    table.add_row("Avg Class Size", f"{results.avg_equivalence_class_size:.2f}", "-", "")
+    table.add_row("k-Anonymity Score", f"{results.k_anonymity}", f"k >= {threshold_k}", k_status)
+    table.add_row(
+        "Records at Risk (k < threshold)",
+        f"{results.records_at_risk:,} ({results.records_at_risk_percent:.1f}%)",
+        "0%",
+        "[bold yellow]ALERT[/bold yellow]"
+        if results.records_at_risk > 0
+        else "[bold green]SAFE[/bold green]",
+    )
+    table.add_row(
+        "Avg Re-Identification Risk",
+        f"{results.re_identification_risk_score * 100:.2f}%",
+        "<= 20%",
+        "",
+    )
+    table.add_row(
+        "Max Re-Identification Risk",
+        f"{results.max_re_identification_risk * 100:.2f}%",
+        f"<= {100 / threshold_k:.1f}%",
+        "",
+    )
+
+    if sensitive and results.l_diversity is not None:
+        l_status = (
+            "[bold green]PASS[/bold green]"
+            if results.l_diversity >= threshold_l
+            else "[bold red]FAIL[/bold red]"
+        )
+        table.add_row(
+            f"l-Diversity ({sensitive})", f"{results.l_diversity}", f"l >= {threshold_l}", l_status
+        )
+
+    console.print()
+    console.print(table)
+    console.print()
+
+    # Publish step summary if in CI
+    summary_md = f"""## 📊 CloakDB Privacy Evaluation Report
+
+| Metric | Value | Threshold | Status |
+| :--- | :--- | :--- | :--- |
+| **Total Records** | `{results.total_records:,}` | - | - |
+| **Quasi-Identifiers** | `{", ".join(results.quasi_identifiers)}` | - | - |
+| **k-Anonymity** | `{results.k_anonymity}` | `k >= {threshold_k}` | {"✅ PASS" if results.k_anonymity >= threshold_k else "❌ FAIL"} |
+| **Records at Risk** | `{results.records_at_risk:,} ({results.records_at_risk_percent:.1f}%)` | `0%` | {"⚠️ ALERT" if results.records_at_risk > 0 else "✅ SAFE"} |
+| **Re-Identification Risk** | `{results.re_identification_risk_score * 100:.2f}%` | - | - |
+"""
+    write_step_summary(summary_md)
+
+    if not results.is_compliant:
+        err_console.print(
+            Panel(
+                f"[bold red][NON-COMPLIANT] Dataset failed privacy guarantees:[/bold red]\n"
+                f"Achieved k-anonymity: {results.k_anonymity} (Target: {threshold_k})\n"
+                + (
+                    f"Achieved l-diversity: {results.l_diversity} (Target: {threshold_l})\n"
+                    if sensitive
+                    else ""
+                )
+                + f"{results.records_at_risk_percent:.1f}% of records are susceptible to re-identification linking attacks.",
+                title="[bold red]Privacy Gate Failed[/bold red]",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    console.print(
+        Panel(
+            f"[bold green][COMPLIANT] Dataset satisfies k-anonymity (k={results.k_anonymity} >= {threshold_k})[/bold green]\n"
+            + (f"and l-diversity (l={results.l_diversity} >= {threshold_l})\n" if sensitive else "")
+            + "Re-identification risk is strictly bounded against quasi-identifier linkage attacks.",
+            title="[bold green]Privacy Gate Passed[/bold green]",
+            border_style="green",
+        )
+    )
+
+
+@app.command()
+def subset(
+    input_file: str = typer.Option(..., "--input", "-i", help="Path to source SQL dump file"),
+    output_file: str = typer.Option(
+        ..., "--output", "-o", help="Target output path for the referential subset SQL dump"
+    ),
+    table: str = typer.Option(
+        ..., "--table", "-t", help="Target root table name to sample (e.g. 'users')"
+    ),
+    limit: int = typer.Option(
+        1000, "--limit", "-n", help="Maximum number of rows to retain from the root table"
+    ),
+    pk: str = typer.Option(
+        "id", "--pk", help="Primary key column name for the root table (default 'id')"
+    ),
+) -> None:
+    """Extract a referentially-sound, proportional dataset subset across foreign key graphs."""
+    in_p = Path(input_file)
+    if not in_p.exists():
+        err_console.print(f"[bold red]Error:[/bold red] Input file '{input_file}' does not exist.")
+        raise typer.Exit(1)
+
+    console.print(
+        Panel(
+            f"[bold cyan]Referential Data Subsetting[/bold cyan]\n\n"
+            f"Root Table:    [magenta]{table}[/magenta] (Limit: [yellow]{limit:,}[/yellow] rows)\n"
+            f"Input Source:  {in_p.name}\n"
+            f"Output Target: {output_file}",
+            title="[bold green]CloakDB Subsetter[/bold green]",
+            border_style="green",
+        )
+    )
+
+    engine = RelationalSubsettingEngine(root_table=table, limit=limit, pk_column=pk)
+
+    with Progress(
+        SpinnerColumn("line"),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task(
+            f"Subsetting relational graph starting from '{table}'...", total=None
+        )
+        stats = engine.subset_sql_dump(input_file, output_file)
+        progress.remove_task(task)
+
+    res_table = Table(
+        title="[bold green]Subsetting Reduction Results[/bold green]", box=box.ROUNDED
+    )
+    res_table.add_column("Table Name", style="bold cyan")
+    res_table.add_column("Original Rows", justify="right", style="white")
+    res_table.add_column("Subsetted Rows", justify="right", style="bold green")
+    res_table.add_column("Reduction", justify="right", style="yellow")
+
+    all_tables = sorted(set(stats.rows_in_per_table.keys()) | set(stats.rows_out_per_table.keys()))
+    for tbl in all_tables:
+        in_count = stats.rows_in_per_table.get(tbl, 0)
+        out_count = stats.rows_out_per_table.get(tbl, 0)
+        reduc = f"{((in_count - out_count) / in_count * 100):.1f}%" if in_count > 0 else "0.0%"
+        res_table.add_row(tbl, f"{in_count:,}", f"{out_count:,}", reduc)
+
+    console.print()
+    console.print(res_table)
+    console.print()
+    console.print(
+        Panel(
+            f"[bold green]SUBSETTING COMPLETE![/bold green]\n\n"
+            f"Total input rows:  [cyan]{stats.total_rows_read:,}[/cyan]\n"
+            f"Total output rows: [green]{stats.total_rows_written:,}[/green]\n"
+            f"Overall reduction: [bold yellow]{stats.reduction_percentage:.1f}%[/bold yellow]\n\n"
+            f"Subsetted dump saved to: [bold white]{Path(output_file).resolve()}[/bold white]\n"
+            "All foreign key dependencies across child tables remain strictly intact.",
+            title="[bold green]Success[/bold green]",
+            border_style="green",
+        )
+    )
 
 
 @app.command()

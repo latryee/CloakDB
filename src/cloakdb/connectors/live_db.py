@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import MetaData, Table, create_engine, inspect, select, update
 from sqlalchemy.engine import Engine
 
 from cloakdb.connectors.base import BaseDatabaseConnector
-from cloakdb.core.engine import CloakEngine
+
+if TYPE_CHECKING:
+    from cloakdb.core.engine import CloakEngine
 
 
 class LiveDatabaseConnector(BaseDatabaseConnector):

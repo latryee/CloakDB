@@ -1,0 +1,8 @@
+- id: cloakdb-lint
+  name: CloakDB PII & Drift Linter
+  description: Validates database schemas and migrations against CloakDB masking policy to prevent unmasked PII leaks.
+  entry: cloakdb lint
+  language: python
+  types_or: [sql, ddl]
+  require_serial: true
+  args: ["-c", "cloakdb.yaml"]

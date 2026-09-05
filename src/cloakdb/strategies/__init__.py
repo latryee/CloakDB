@@ -3,6 +3,7 @@
 import cloakdb.strategies.datetime  # noqa: F401
 import cloakdb.strategies.differential_privacy  # noqa: F401
 import cloakdb.strategies.fpe  # noqa: F401
+import cloakdb.strategies.free_text  # noqa: F401
 import cloakdb.strategies.general  # noqa: F401
 import cloakdb.strategies.hash  # noqa: F401
 import cloakdb.strategies.json  # noqa: F401

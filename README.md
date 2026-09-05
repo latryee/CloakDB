@@ -230,6 +230,29 @@ cloakdb diff -c1 cloakdb.v1.yaml -c2 cloakdb.v2.yaml -i sample.csv
 
 ---
 
+### 7. `cloakdb evaluate` (Mathematical Privacy Evaluation)
+Evaluates formal $k$-anonymity, $l$-diversity, and re-identification risk metrics across quasi-identifiers:
+
+```bash
+# Evaluate k-anonymity (k >= 5) and l-diversity (l >= 2) on sensitive medical or financial data
+cloakdb evaluate -i sanitized.csv --qi "age,zip_code,gender" -s "diagnosis" -k 5 -l 2
+
+# Output machine-readable JSON for automated compliance gates
+cloakdb evaluate -i sanitized.parquet --qi "birth_year,postal_code" --json
+```
+
+---
+
+### 8. `cloakdb subset` (Referential Data Subsetting)
+Extracts a proportional, referentially consistent subset of production dumps for lightweight staging and developer environments:
+
+```bash
+# Retain only 1,000 users and cascade foreign-key constraints to orders, items, and reviews
+cloakdb subset -i prod_dump.sql -o staging_subset.sql --table users --limit 1000
+```
+
+---
+
 ## ⚙️ Configuration Reference (`cloakdb.yaml`)
 
 ```yaml

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Mathematical Privacy Evaluator (`cloakdb evaluate`)**: Evaluates formal $k$-anonymity, $l$-diversity, and re-identification risk metrics across quasi-identifiers and sensitive attributes with CI/CD pass/fail gates and JSON output.
+- **Referential Data Subsetting Engine (`cloakdb subset`)**: Graph-based relational subsetting traversing foreign keys upstream and downstream to export compact, consistent staging datasets.
+- **Free-Text Semantic PII Redactor (`text_redact`)**: In-place unstructured entity redaction for customer notes, support tickets, and chat logs targeting emails, phones, credit cards, TCKN, SSN, and IPv4 addresses.
+- **GitHub Actions Step Summaries & PR Annotations**: Native `$GITHUB_STEP_SUMMARY` markdown report publishing and inline PR annotation commands (`::error`, `::warning`) on schema drift and PII leaks.
+- **Git Pre-Commit Hook (`.pre-commit-hooks.yaml`)**: Seamless pre-commit hook integration running `cloakdb lint` on SQL migration files before committing.
+- **Pluggable KMS & Secret Vault Providers**: Extensible `SecretProvider` interface supporting environment variables, HashiCorp Vault KV v2, and AWS KMS key decryption.
+- **DuckDB Connector (`DuckDBConnector`)**: Native support for querying, inspecting, and in-place chunked masking of `.duckdb` databases.
+- **Apache Airflow Orchestration Operator (`CloakDBOperator`)**: Standard operator for integrating CloakDB directly into Apache Airflow DAGs.
+
 ### Security
 - **Strict Insecure Salt Detection**: Added automatic runtime audit detecting default or weak salts (`< 32` characters or known defaults like `"cloakdb-salt"`). Fails CI/CD execution with exit code 1 unless `--allow-insecure-salt` is explicitly provided.
 - **Salt Rotation Fingerprinting**: Cryptographic SHA-256 fingerprinting embedded directly into `cloakdb.yaml` (`salt_fingerprint`). Prevents silent foreign key inconsistencies across runs and prompts for explicit reconciliation (`--ignore-salt-mismatch` or `--update-salt-fingerprint`).

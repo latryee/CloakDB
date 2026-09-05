@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import IO
+from typing import IO, TYPE_CHECKING
 
-from cloakdb.core.engine import CloakEngine
+if TYPE_CHECKING:
+    from cloakdb.core.engine import CloakEngine
 
 
 class BaseStreamParser(ABC):

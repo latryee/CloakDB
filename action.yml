@@ -31,6 +31,10 @@ inputs:
     description: "Run masking validation in dry-run mode without modifying output"
     required: false
     default: "false"
+  summary:
+    description: "Whether to publish Markdown compliance and throughput report to GITHUB_STEP_SUMMARY"
+    required: false
+    default: "true"
 
 outputs:
   masked_path:

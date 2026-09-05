@@ -10,16 +10,20 @@ This document outlines the planned future direction and engineering priorities f
 - [x] **Safe AST Expression Evaluator**: Elimination of arbitrary code execution vectors in conditional masking.
 - [x] **Zero-Hardcoded Secrets & Dynamic Salt Generation**: Complete elimination of static fallback salts and enforced cryptographically secure random salt initialization.
 - [x] **Golden Integration Fixture Suite**: End-to-end multi-table relational tests.
+- [x] **Semantic Redaction in Free-Text (`text_redact`)**: In-place unstructured entity redaction for customer notes, support tickets, and chat logs.
+- [x] **Mathematical Privacy Evaluator (`cloakdb evaluate`)**: Formal $k$-anonymity, $l$-diversity, and re-identification risk metrics engine.
+- [x] **Referential Data Subsetting (`cloakdb subset`)**: Relational foreign-key graph traversal for proportional staging dataset extraction.
+- [x] **GitHub Actions Step Summaries & PR Annotations**: Native `$GITHUB_STEP_SUMMARY` and workflow commands.
+- [x] **Pluggable KMS & Secret Vault Providers**: Pluggable secret salt and FPE key providers (Env, HashiCorp Vault, AWS KMS).
+- [x] **Ecosystem Connectors**: Native DuckDB connector and Apache Airflow `CloakDBOperator`.
 
 ---
 
 ## Planned Future Priorities
 
-### 1. Semantic Redaction in Free-Text
-- Integrate regex and NLP entity recognition for partial PII redaction inside unstructured text fields (e.g. customer support notes).
-
-### 2. Direct PyPI Distribution & Signed Releases
+### 1. Direct PyPI Distribution & Signed Releases
 - Set up automated GitHub Actions release workflow publishing wheels and sdist packages directly to PyPI with provenance attestations upon git tag creation.
 
-### 3. Additional Database Connectors
+### 2. Additional Database Connectors
 - Native connectors for MongoDB collections and ClickHouse tables for live staging sanitization.
+
