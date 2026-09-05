@@ -88,7 +88,7 @@ class DuckDBConnector:
         # Atomically swap tables
         self.connection.execute(f"DROP TABLE {table_name}")
         self.connection.execute(f"ALTER TABLE {temp_tbl} RENAME TO {table_name}")
-        return total_rows
+        return int(total_rows)
 
     def close(self) -> None:
         """Closes the DuckDB connection."""

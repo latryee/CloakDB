@@ -45,7 +45,7 @@ class VaultSecretProvider(SecretProvider):
         vault_token: str | None = None,
         mount_point: str = "secret",
     ):
-        self.vault_addr = vault_addr or os.getenv("VAULT_ADDR", "http://127.0.0.1:8200")
+        self.vault_addr: str = vault_addr or os.getenv("VAULT_ADDR") or "http://127.0.0.1:8200"
         self.vault_token = vault_token or os.getenv("VAULT_TOKEN", "")
         self.mount_point = mount_point
 
@@ -97,7 +97,7 @@ class AwsKmsSecretProvider(SecretProvider):
             client = boto3.client("kms", region_name=self.region_name)
             raw_cipher = base64.b64decode(ciphertext_b64 or key_id)
             resp = client.decrypt(CiphertextBlob=raw_cipher)
-            return resp["Plaintext"].decode("utf-8")
+            return str(resp["Plaintext"].decode("utf-8"))
         except ImportError as e:
             raise RuntimeError(
                 "boto3 is required for AWS KMS secret retrieval. Install with `pip install boto3`."

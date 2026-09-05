@@ -175,5 +175,8 @@ module = [
     "faker.*",
     "pyarrow.*",
     "opentelemetry.*",
+    "boto3.*",
+    "duckdb.*",
+    "airflow.*",
 ]
 ignore_missing_imports = true
